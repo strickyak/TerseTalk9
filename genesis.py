@@ -1346,7 +1346,15 @@ print
 print 'OpList:', OpList
 print
 print 'Memory:', Here, Memory[:Here]
-print 'Here:', Here
+print
+for resource, used, maximum in [
+        ('Memory', Here, 65536),
+        ('Classes', len(ClassDict), 255),
+        ('Symbols', len(InternDict), 256),
+        ('Opcodes', len(OpNums), 256),
+    ]:
+        print '%10s  %5.2f%%  %6d/%6d full' % (resource, 100.0 * used / maximum, used, maximum)
+
 
 sys.stdout = open('_generated.h', 'w')
 GenerateH()

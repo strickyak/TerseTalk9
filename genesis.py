@@ -120,7 +120,7 @@ class PInt(PExpr):
 class PUnary(PExpr):
     def __init__(self, r, meth):
         self.r = r
-        self.meth = meth
+        self.meth = meth.upper()
     def __str__(self):
         return '%s %s' % (self.r, self.meth)
     def visit(self, v):
@@ -155,7 +155,7 @@ class PRel(PExpr):
 class PKeyword(PExpr):
     def __init__(self, r, meth, args):
         self.r = r
-        self.meth = meth
+        self.meth = meth.upper()
         self.args = args
     def __str__(self):
         z = '( (%s) ' % self.r
@@ -380,14 +380,19 @@ class LocalsVisitor(object):
     def __init__(self):
         self.locals = set()
     def visitSeq(self, p):
-        for e in self.exprs:
+        for e in p.exprs:
             e.visit(self)
     def visitAssign(self, p):
-        for v in self.vars:
-            self.locals.add(v)
-        expr.visit(self)
+        p.expr.visit(self)
+        if isinstance(p.vars, list):
+            for v in p.vars:
+                self.locals.add(v.s)
+        elif isinstance(p.vars, PVar):
+            self.locals.add(p.vars.s)
+        else:
+            raise type(p)
     def visitList(self, p):
-        for e in self.exprs:
+        for e in p.exprs:
             e.visit(self)
     def visitVar(self, p):
         pass
@@ -406,50 +411,108 @@ class LocalsVisitor(object):
         p.a.visit(self)
     def visitKeyword(self, p):
         p.r.visit(self)
-        for e in self.args:
+        for e in p.args:
             e.visit(self)
     def visitMacro(self, p):
-        for v in self.vars:
+        for v in p.vars:
             self.locals.add(v)
-        for e in self.exprs:
+        for e in p.exprs:
             e.visit(self)
 
 class CompilerVisitor(object):
-    def __init__(self, top):
+    def __init__(self, top, cls):
+        self.top = top
+        self.cls = cls
         self.explain = []
         self.codes = []
-        self.top = top
+        self.slots = {}
+        self.flex = None
         self.localindex = {}
-        v = LocalsVisitor()
-        top.visit(v)
-        self.locals = sorted(v.locals)
-        for i,v in zip(range(len(self.locals)), self.locals):
-            self.localindex[v] = i
+
+        for k,offset in self.cls.bslots:
+            # Strip prefix b_ from k.
+            self.slots[k[2:].upper()] = ('b', offset)
+
+        for k,offset in self.cls.pslots:
+            # Strip prefix p_ from k.
+            self.slots[k[2:].upper()] = ('p', offset)
+
+        for k,offset in self.cls.flexes:
+            # Like ('FLEX_BYTES', 2) or ('FLEX_PTRS', 2).
+            self.flex = (k, offset)
+
+        # Find all names assigned.  Filter out the slots, to get locals.
+        # (This is like the python rule: instead of declaring locals, assign them.)
+        lv = LocalsVisitor()
+        top.visit(lv)
+        self.locals = sorted([e for e in lv.locals if e not in self.slots])
+
+        for i,var in zip(range(len(self.locals)), self.locals):
+            self.localindex[var] = i
 
     def visitSeq(self, p):
-        last = self.exprs.pop()
-        for e in self.exprs:
+        last = p.exprs.pop()
+        for e in p.exprs:
             e.visit(self)
             self.codes.append('drop')  # Drop middle results.
         last.visit(self)  # the last one returns the result.
+
     def visitAssign(self, p):
-        expr.visit(self)
-        if len(self.vars) > 1:
-            raise 'TODO'
-        var = self.vars[0]
-        i = self.localindex[var]
-        if i<4 and False:
-            self.codes.append('sto%d' % i)
+        p.expr.visit(self)
+        self.codes.append('dup')  # one to assign and one for result.
+
+        if isinstance(p.vars, list):
+            raise 'TODO: list deconstruction'
+        var = p.vars.s
+
+        print 'visitAssign:', p, '|', p.vars, '|', p.expr
+        print 'self.slots,var:', self.slots, '|', var, type(var)
+        slot = self.slots.get(var)
+        if slot:
+            kind, offset = slot
+            if kind=='b':
+                self.codes.append('self')
+                self.codes.append('putb_b')
+                self.codes.append(offset)
+            elif kind=='p':
+                self.codes.append('self')
+                self.codes.append('putp_b')
+                self.codes.append(offset)
+            else:
+                raise 'bad'
         else:
-            self.codes.append('sto_b')
-            self.codes.append(i)
+            # Not a slot, so it should be a local var.
+            i = self.localindex[var]
+            if i<4 and False:
+                self.codes.append('sto%d' % i)
+            else:
+                self.codes.append('sto_b')
+                self.codes.append(i)
         
     def visitList(self, p):
         raise 'TODO'
+
     def visitVar(self, p):
         var = p.s
-        if var in ['SELF','SUPER','TRUE','FALSE','NIL','A','B']:
+        slot = self.slots.get(var)
+        cls = ClassDict.get(var)
+        if var in ['SELF','SUPER','TRUE','FALSE','NIL','A','B','C','D']:
             self.codes.append(var)
+        elif slot:
+            kind, offset = slot
+            if kind=='b':
+                self.codes.append('self')
+                self.codes.append('getb_b')
+                self.codes.append(offset)
+            elif kind=='p':
+                self.codes.append('self')
+                self.codes.append('getp_b')
+                self.codes.append(offset)
+            else:
+                raise 'bad'
+        elif cls:
+            self.codes.append('cls_b')
+            self.codes.append(cls.b_this)
         else:
             i = self.localindex[var]
             if i<4 and False:
@@ -465,39 +528,35 @@ class CompilerVisitor(object):
             self.codes.append(255&((n<<1)|1))
         else:
             if n<0: n+=65536
-            self.codes.append('lit_b')
             self.codes.append('lit_w')
             self.codes.append(255&(n>>7))
             self.codes.append(255&((n<<1)|1))
     def visitUnary(self, p):
         p.r.visit(self)
-        #self.codes.append(1)  # Unary
         self.codes.append('call0_b')
         self.codes.append(InternDict[p.meth])
     def visitMul(self, p):
         p.a.visit(self)
         p.r.visit(self)
-        #self.codes.append(2)  # Binary
         self.codes.append('call1_b')
         self.codes.append(InternDict[p.meth])
     def visitAdd(self, p):
         p.a.visit(self)
         p.r.visit(self)
-        #self.codes.append(2)  # Binary
         self.codes.append('call1_b')
         self.codes.append(InternDict[p.meth])
     def visitRel(self, p):
         p.a.visit(self)
         p.r.visit(self)
-        #self.codes.append(2)  # Binary
         self.codes.append('call1_b')
         self.codes.append(InternDict[p.meth])
     def visitKeyword(self, p):
-        for a in self.args:
+        args = p.args[:]
+        args.reverse()
+        for a in args:
             a.visit(self)
         p.r.visit(self)
-        #self.codes.append(len(self.args)+1)  # arity
-        self.codes.append('call%d_b' % len(self.args))
+        self.codes.append('call%d_b' % len(args))
         self.codes.append(InternDict[p.meth])
     def visitMacro(self, p):
         name = '_'.join(self.keywords)
@@ -506,12 +565,11 @@ class CompilerVisitor(object):
 
 MACROS = []
 
-def CompileToCodes(s):
+def CompileToCodes(s, cls):
     p = Parser(s).Parse()
-    v = CompilerVisitor(p)
+    v = CompilerVisitor(p, cls)
     p.visit(v)
-    return v.codes
-
+    return v.codes, len(v.locals)
 
 InternDict = {}  # str to index.
 def Intern(s):
@@ -640,9 +698,6 @@ class Num(Obj):
     pass
 
 class Int(Num):  # Small 15-bit signed integer.  Encoded in an oop with low bit set.
-    Cmeth_Plus = '''
-    Self Oop2Num Arg1 Oop2Num + Num2Oop Return
-'''
     pass
 
 class Addr(Num):  # 16-bit unsigned integer.
@@ -672,7 +727,7 @@ class FlexB(Flex):  # LowLevel: Flexible-length bytes storage.
     FLEX_BYTES = 2
 
 class FlexP(Flex):  # LowLevel: Flexible-length oops storage.
-    FLEX_PTRS = True
+    FLEX_PTRS = 2
 
 class Tuple(FlexP):  # Tuple: uses fixed FlexP.
     pass
@@ -727,11 +782,11 @@ class Meth(Named):
     # replace (and re-linked-list) the entire Meth object.
     # Limit of about 250 bytecodes.
 
-class Blk(Meth):
-    pass
-
 class Demo(Obj):
-    pass
+    B_one = 2     # two byte fields: one, two.
+    B_two = 3
+    P_three = 4   # two oop fields: three, four.
+    P_four = 6
 
 ####  Stack layout
 ## [
@@ -747,39 +802,58 @@ class Demo(Obj):
 ## ]         <--- sp?
 
 # Offests from Frame pointer.
+K_ARG4 = 16
 K_ARG3 = 14
 K_ARG2 = 12
 K_ARG1 = 10
-K_RCVR = 8
-K_MSG = 6
-K_DE = 4
+K_RCVR = 8    # conceptually, RCVR is like ARG0.
+K_MSG = 6     # Needed for a debugger interpreting a stack.
+K_DE = 4      # Could omit this.  It makes viewing stacks easier.
 K_RET_PC = 2
 K_RET_FP = 0
-K_LCL1 = -2
-K_LCL2 = -4
-K_LCL3 = -6
+K_LCL0 = -2
+K_LCL1 = -4
+K_LCL2 = -6
+K_LCL3 = -8
+
+Method['URCLS']['new'] = '''C
+    word rcvr = W(fp + K_RCVR);
+    fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
+    word z = MakeInstance(rcvr, 0, 0);
+    PUSH(z);
+'''
 
 Method['DEMO']['run'] = '''B
     lit_b 51 self #double: lit_w %d %d call dup show
     lit_b 51 self #twice: lit_w %d %d call dup show
-    add show
-
+    add dup show
 ''' % (0xDE, 0x01, 0xDE, 0x01)
 
-Method['DEMO']['double:'] = '''B
-    arg1 arg1 add
-'''
-Method['DEMO']['twice:'] = '''T
-    a + a
+Method['DEMO']['run2'] = '''T
+    acct = Demo new init.
+            acct balance show.
+    acct deposit: 10.
+            acct balance show.
+    acct deposit: 100.
+            acct balance show.
+    acct withdraw: 20.
+            acct balance show
 '''
 
-Method['INT']['+'] = '''B
-  self arg1 add
-'''
+Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.
+Method['DEMO']['twice:'] = 'T a + a '           # Using TerseTalk.
 
-Op['stop'] = '''
-  goto STOP;
-'''
+Method['DEMO']['init'] = 'T one = 0. self'
+Method['DEMO']['deposit:'] = 'T one = one + a. nil'
+Method['DEMO']['withdraw:'] = 'T one = one - a. nil'
+Method['DEMO']['balance'] = 'T one'
+
+Method['INT']['+'] = 'B self arg1 add '
+Method['INT']['-'] = 'B self arg1 subtract '
+Method['INT']['show'] = 'B self show self'
+
+Op['stop'] = ' goto STOP; '
+
 Op['self'] = '  PUSH(W(fp+K_RCVR));'
 Op['arg1'] = '  PUSH(W(fp+K_ARG1));'
 Op['arg2'] = '  PUSH(W(fp+K_ARG2));'
@@ -787,9 +861,51 @@ Op['arg3'] = '  PUSH(W(fp+K_ARG3));'
 Op['a'] = '  PUSH(W(fp+K_ARG1));'
 Op['b'] = '  PUSH(W(fp+K_ARG2));'
 Op['c'] = '  PUSH(W(fp+K_ARG3));'
-Op['lcl1'] = '  PUSH(W(fp+K_LCL1));'
-Op['lcl2'] = '  PUSH(W(fp+K_LCL2));'
-Op['lcl3'] = '  PUSH(W(fp+K_LCL3));'
+Op['d'] = '  PUSH(W(fp+K_ARG4));'
+Op['cls_b'] = ' byte n = BYTE(pc); pc += 1; PUSH(ClassVec[n]); '
+
+# Get/Put pointer slots.
+Op['getp_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word obj = PEEK(0);
+    word x = W(obj + n);
+    POKE(0, x);
+'''
+Op['putp_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word obj = POP();
+    word x = POP();
+    PUT_WORD(obj+n, x);
+'''
+
+# Get/Put byte slots: values are unsigned integers in 0..255.
+Op['getb_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word obj = PEEK(0);
+    byte x = B(obj + n);
+    POKE(0, UB2OOP(x));
+'''
+Op['putb_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word obj = POP();
+    word x = POP();
+    CHECK3(x&1, 1, x);
+    CHECK3(x&0xFE00, 0, x);
+    PUT_BYTE(obj+n, OOP2UB(x));
+'''
+
+# Store/Recall local variables.
+Op['sto0'] = '  word w = POP(); PUT_WORD(fp-2, w);'
+Op['sto1'] = '  word w = POP(); PUT_WORD(fp-4, w);'
+Op['sto2'] = '  word w = POP(); PUT_WORD(fp-6, w);'
+Op['sto3'] = '  word w = POP(); PUT_WORD(fp-8, w);'
+Op['sto_b'] = ' byte n = BYTE(pc); pc += 1; word w = POP(); PUT_WORD(fp-2*(n+1), w);'
+Op['rcl0'] = '  word w =W(fp-2); PUSH(w);'
+Op['rcl1'] = '  word w =W(fp-4); PUSH(w);'
+Op['rcl2'] = '  word w =W(fp-6); PUSH(w);'
+Op['rcl3'] = '  word w =W(fp-8); PUSH(w);'
+Op['rcl_b'] = ' byte n = BYTE(pc); pc += 1; word w =W(fp-2*(n+1)); PUSH(w);'
+
 Op['true'] = '  PUSH(trueAddr);'
 Op['false'] = '  PUSH(falseAddr);'
 Op['nil'] = '  PUSH(nilAddr);'
@@ -856,13 +972,14 @@ Op['add'] = '''
   POKE(0, (0xFFFE & a)+b);
 '''
 
-Op['sub'] = '''
+Op['subtract'] = '''
   word a = POP();
   CHECK3(a&1, 1, a);
   word b = PEEK(0);
   CHECK3(b&1, 1, b);
-  word negb = (~b) + 2;
-  POKE(0, a+negb);
+  word nega = (~a) + 2;
+  fprintf(stderr, "subtract a=%04x b=%04x nega=%04x z=%04x\\n", a, b, nega, b+nega);
+  POKE(0, b+nega);
 '''
 
 Op['call0_b'] = '''
@@ -881,7 +998,8 @@ Op['call0_b'] = '''
 
   word meth = FindMethBySymbolNumber(rcvr, msg);
   byte i;
-  for (i=0; i<B(meth + METH_B_numL); i++) {
+  byte numL = B(meth + METH_B_numL);
+  for (i=0; i<numL; i++) {
     PUSH(nilAddr);
   }
   pc = meth + METH_FLEXSIZE + 1;
@@ -941,12 +1059,12 @@ Op['return'] = '''
   fprintf(stderr, "Popped FP = $%04x\\n", fp);
   if (!fp) {
     fprintf(stderr, "Finishing with Zero FP.\\n");
-    exit(0);
+    goto STOP;
   }
   pc = POP();
   if (!pc) {
     fprintf(stderr, "Finishing with Zero PC.\\n");
-    exit(0);
+    goto STOP;
   }
   fprintf(stderr, "Popped PC = $%04x\\n", pc);
 
@@ -1006,6 +1124,7 @@ def FixSlotsOnClass(c, inst):
 ClassDict = {}
 for c in AllClassesPreorder():
     inst = Class()
+    inst.pycls = c
     inst.nick = c.__name__
     inst.name = c.__name__.upper()
     inst.flexstring = inst.name
@@ -1046,7 +1165,8 @@ for c in AllClassesPreorder():
 # Link metaclass class objects.
 for c in AllClassesPreorder():
     meta = ClassDict[c.__name__.upper() + 'CLS']
-    meta.cls = METACLASS
+    #meta.cls = METACLASS
+    meta.b_cls = METACLASS.b_this
     inst = ClassDict[c.__name__.upper()]
     inst.b_cls = meta.b_this
     inst.b_partner = meta.b_this
@@ -1056,6 +1176,8 @@ for c in AllClassesPreorder():
 Op = dict([(k.upper(), v) for k,v in Op.items()])  # Normalize keys upper.
 Method = dict([(k.upper(), v) for k,v in Method.items()])  # Normalize keys upper.
 for k,v in Method.items():  # Also normalize inner keys (method names).
+    for k2 in v:
+        Intern(k2.upper())
     Method[k] = dict([(k2.upper(), v2) for k2,v2 in v.items()])
 
 print '=== Op:', repr(Op)
@@ -1070,8 +1192,9 @@ for i, op in zip(range(len(OpList)), OpList):
 print '=== OpNums:', repr(OpNums)
 
 def CompileMethod(cname, mname, v):
+    numL = 0
     if v[0] == 'T':
-        codes = CompileToCodes(v[1:])
+        codes, numL = CompileToCodes(v[1:], ClassDict[cname])
         # Change to format 'B' for text bytecode string.
         v = 'B ' + ' '.join([str(c) for c in codes])
 
@@ -1118,7 +1241,7 @@ def CompileMethod(cname, mname, v):
     codes.append(OpNums['RETURN']);
     print 'CompileMethod: %s %s: %s' % (cname, mname, explain)
     print 'CompileMethod: %s %s: %s' % (cname, mname, codes)
-    return explain, codes
+    return explain, codes, numL
 
 CompiledMethods = {}
 for cname, m in sorted(Method.items()):
@@ -1126,16 +1249,16 @@ for cname, m in sorted(Method.items()):
     print 'CNAME: %s METHODS: %s' % (cname, m)
     for mname, v in sorted(m.items()):
         mname = mname.upper();
-        explain, codes = CompileMethod(cname, mname, v)
-        CompiledMethods[(cname, mname)] = codes
+        explain, codes, numL = CompileMethod(cname, mname, v)
+        CompiledMethods[(cname, mname)] = (codes, numL)
 
-for (cname,mname),codes in sorted(CompiledMethods.items()):
+for (cname,mname),(codes,numL) in sorted(CompiledMethods.items()):
     meth = Meth()
     cls = ClassDict[cname]
     meth.b_cls = ClassDict['METH'].b_this
     meth.b_name = Intern(mname.upper())
     meth.b_owner = cls.b_this
-    meth.b_numL = 0
+    meth.b_numL = numL
     meth.p_next = cls.p_meths  # prepend to linked list.
     cls.p_meths = meth
     meth.flexsize = len(codes)
@@ -1182,8 +1305,8 @@ for (k, v) in InternSym.items():
 
 for m in MemorableList:
     m.b_gcsize = (m.size>>1, m.nick, m.addr, m.basesize, m.__class__.__name__)
-    m.CLS = ClassDict[m.__class__.__name__.upper()]
-    m.b_cls = m.CLS.b_this
+    #m.CLS = ClassDict[m.__class__.__name__.upper()]
+    #m.b_cls = m.CLS.b_this
     m.Materialize()
 
 pass;pass;pass
@@ -1256,18 +1379,21 @@ void Boot() {
     print '''
 void Loop() {
   while (1) {
-    byte opcode = BYTE(pc);
-    ++pc;
 #ifdef DEBUG
     Hex20("pc", pc, pc);
     Hex20("fp", fp, fp);
     Hex20("sp", sp, sp);
+#endif
+    byte opcode = BYTE(pc);
+    ++pc;
+#ifdef DEBUG
     fprintf(stderr, "Step: opcode: $%02x=%d.=%s\\n", opcode, opcode, OpNames[opcode]);
 #endif
     switch (opcode) {
 '''
     for op in OpList:
         print '\tcase OP_%s: {' % op
+        print '\t  fprintf(stderr, "OP: %s\\n");' % op
         for k,v in Op.items():
             done = False
             if k.upper() == op:

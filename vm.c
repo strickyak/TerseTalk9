@@ -21,7 +21,7 @@ word gcroot;
 word clsroot;
 
 void Hex20(char* s, int d, word p) {
-	fprintf(stderr, "Hex20(%s#%04x=%d.)%04x: ", s, d, d, p);
+	fprintf(stderr, "[%s $%04x=%d.] %04x: ", s, d, d, p);
 	for (int i = 0; i < 20; i++) {
 		byte b = B(p+i);
 		fprintf(stderr, "%02x ", b);
@@ -35,10 +35,57 @@ void Hex20(char* s, int d, word p) {
 	fflush(stderr);
 }
 
+void fprintN(FILE* fd, char* message, word ptr, byte len) {
+	char* p = malloc(len + 1);
+	for (byte i = 0; i < len; i++) {
+		p[i] = B(ptr + i);
+	}
+	p[len] = '\0';
+	fprintf(fd, "%s <%s>\n", message, p);
+	free(p);
+}
+void fprintSymNum(FILE* fd, char* message, byte symNum) {
+	word sym = SymVec[symNum];
+	word guts = W(sym + SLICE_P_guts);
+	byte begin = B(sym + SLICE_B_begin);
+	byte len = B(sym + SLICE_B_len);
+	Hex20("(sym)", symNum, sym);
+	Hex20("(guts)", symNum, guts);
+	fprintN(fd, message, guts + FLEXB_FLEXSIZE + 1 + begin, len);
+}
+
+void Inventory() {
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
+	for (word i = 0; i < 256; i++) {
+		if (ClassVec[i]) {
+			char buf[80];
+			sprintf(buf, "ClassVec[$%02x=%3d.] = ", i, i);
+			Hex20(buf, i, ClassVec[i]);
+			fprintf(stderr, "\n");
+		}
+	}
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
+	for (word i = 0; i < 256; i++) {
+		if (SymVec[i]) {
+			char buf[80];
+			sprintf(buf, "SymVec[$%02x=%3d.] = ", i, i);
+			fprintSymNum(stderr, buf, i);
+			fprintf(stderr, "\n");
+		}
+	}
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
+}
+
 word MakeInstance(word cls, word flexbytes, byte flexsize) {
+	Hex20("MakeInstance cls", cls, cls);
 	word p = MemoryLen;
 	byte flags = B(cls + CLASS_B_flags);
+	fprintf(stderr, "MakeInstance... flags=%02x", flags);
 	byte basesz = B(cls + CLASS_B_numB) + 2*B(cls + CLASS_B_numP);
+	fprintf(stderr, "MakeInstance... basesz=%02x", basesz);
 	byte sz = basesz;
 	if (flexbytes) {
 		sz += 1 + flexsize;  // add flex if needed.
@@ -47,6 +94,7 @@ word MakeInstance(word cls, word flexbytes, byte flexsize) {
 		if(flags != 0) RAISE("ShouldNotHaveFlexFlag");
 	}
 	if (sz&1) sz++;  // even-align.
+	fprintf(stderr, "MakeInstance... sz=%02x", sz);
 	MemoryLen += sz;
 
 	PUT_BYTE(p + UR_B_gcsize, sz>>1);
@@ -64,6 +112,8 @@ word MakeInstance(word cls, word flexbytes, byte flexsize) {
 }
 
 word FindMethBySymbolNumber(word rcvr, byte symNum) {
+	fprintf(stderr, "FindMethBySymbolNumber: %04x %02x\n", rcvr, symNum);
+	fprintSymNum(stderr, "... want meth=", symNum);
 	word cls;
 	if (rcvr & 1) {
 		// Tagged short int.
@@ -78,9 +128,11 @@ word FindMethBySymbolNumber(word rcvr, byte symNum) {
 	if (symNum >= SymVecLen) RAISE("BadSymNum");
 	while (cls) {
 		Hex20("Find Meth cls", cls, cls);
+		fprintN(stderr, "... cls=", cls + CLASS_FLEXSIZE + 1, B(cls + CLASS_FLEXSIZE));
 		word meth = W(cls + CLASS_P_meths);
 		while (meth) {
 			Hex20("Find Meth meth", meth, meth);
+			fprintSymNum(stderr, "... try meth=", B(meth + NAMED_B_name));
 			if (B(meth + NAMED_B_name) == symNum) {
 				return meth;
 			}
@@ -92,18 +144,22 @@ word FindMethBySymbolNumber(word rcvr, byte symNum) {
 }
 
 byte FindSymIndex(char* s, byte len) {
-	byte n = strlen(s);
-	for (int i = 0; i < SymVecLen; i++) {
+	for (byte i = 0; i < SymVecLen; i++) {
+		//fprintSymNum(stderr, ".......... try", i);
 		word y = SymVec[i];
-		if (B(y + SYM_B_len) != n) continue;
+		if (B(y + SYM_B_len) != len) continue;
 
 		word off = B(y + SYM_B_begin);
 		word x = W(y + SYM_P_guts);
 		word p = x + FLEXB_FLEXSIZE + 1 + off;
-		for (int j = 0; j < n; j++ ) {
-			if (UPPER(B(p)) != UPPER(s[j])) continue;
+		byte eq = 1;
+		for (int j = 0; j < len; j++ ) {
+			if (UPPER(B(p+j)) != UPPER(s[j])) {
+				eq = 0;
+				break;
+			}
 		}
-		return i;
+		if (eq) return i;
 	}
 	RAISE("SymNotFound");
 }
@@ -111,22 +167,24 @@ byte FindSymIndex(char* s, byte len) {
 word FindClassP(char* name, byte len) {
 	for (int i = 1; i < ClassVecLen; i++) {
 		word c = ClassVec[i];
-		Hex20("someclass", i, c);
-		Hex20("flexsize", CLASS_FLEXSIZE, c+CLASS_FLEXSIZE);
+		//Hex20("someclass", i, c);
+		//Hex20("flexsize", CLASS_FLEXSIZE, c+CLASS_FLEXSIZE);
 		if (B(c + CLASS_FLEXSIZE) != len) continue;
 		word p = c + CLASS_FLEXSIZE + 1;
-		Hex20("test-------=======", i, p);
+		//Hex20("test-------=======", i, p);
 		byte eq = 1;
 		for (int j = 0; j < len; j++ ) {
-			Hex20("j--------------", j, p);
-			Hex20("left--------------", UPPER(B(p+j)), p);
-			Hex20("right--------------", UPPER(name[j]), p);
+			//Hex20("j--------------", j, p);
+			//Hex20("left--------------", UPPER(B(p+j)), p);
+			//Hex20("right--------------", UPPER(name[j]), p);
 			if (UPPER(B(p+j)) != UPPER(name[j])) {
 				eq = 0;
 				break;
 			}
 		}
-		if (eq) return c;
+		if (eq) {
+			return c;
+		}
 	}
 	RAISE("ClassNotFound");
 }
@@ -182,17 +240,40 @@ STOP:
 	fclose(fd);
 }
 
+void Call0(word rcvr, byte msgNum) {
+	word m = FindMethBySymbolNumber(rcvr, msgNum);
+	sp = 0x8000;
+	fp = 0;
+	pc = 0;
+	PUSH(rcvr);
+	PUSH(msgNum);
+	PUSH(0xDE00);
+	PUSH(pc);
+	PUSH(fp);
+	fp = sp;
+	byte numL = B(m + METH_B_numL);
+	for (byte i = 0; i < numL; i++) {
+		PUSH(nilAddr);
+	}
+	pc = m + METH_FLEXSIZE + 1;
+	Hex20("Start Loop", pc, pc);
+	Loop();
+	Hex20("Ended Loop", pc, pc);
+}
+
 void RunDemo() {
 	sp = 0x8000;
 	fp = 0;
 	pc = 0;
+
 	word demo = FindClassP("DEMO", 4);
 	Hex20("FindClassP demo", 888, demo);
 	word inst = MakeInstance(demo, 0, 0);
 	Hex20("MakeInstance demo", 888, inst);
-	byte msgI = FindSymIndex("RUN", 3);
-	Hex20("FindSymIndex RUN", 888, msgI);
-	word m = FindMethBySymbolNumber(inst, msgI);
+
+	byte i = FindSymIndex("RUN", 3);
+	Hex20("FindSymIndex RUN", 888, i);
+	word m = FindMethBySymbolNumber(inst, i);
 	Hex20("FindMethBySymbolNumber RUN", 888, m);
 
 	pc = m + METH_FLEXSIZE + 1;
@@ -209,12 +290,19 @@ void RunDemo() {
 	Hex20("Start Loop", pc, pc);
 	Loop();
 	Hex20("Ended Loop", pc, pc);
+
+	i = FindSymIndex("RUN2", 4);
+	Call0(inst, i);
 }
 
 int main() {
 	LoadImage("_generated.image");
 	intClassAddr = FindClassP("INT", 3);
+	fprintf(stderr, "intClassAddr=%04x\n", intClassAddr);
+
+	Inventory();
 	RunDemo();
+
 	fprintf(stderr, "250 OKAY\n");
 	exit(0);
 	Loop();

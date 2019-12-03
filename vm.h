@@ -37,6 +37,7 @@ extern word pc, fp, sp, tmp;
 #define LOCAL(N) WORD(fp + 2 * (4 + (N)))  // over prevFP, prevPC, numArg, msg.  rcvr=0, 1,2,3=arg1,2,3
 #define PUT_LOCAL(N,X) PUT_WORD(fp + 2 * (4 + (N)), (X))
 
+extern word MakeInstance(word cls, word flexbytes, byte flexsize);
 extern word FindMethBySymbolNumber(word rcvr, byte msg);
 extern byte FindSymIndex(char* s, byte len);
 extern word FindClassP(char* name, byte len);
@@ -46,5 +47,8 @@ extern void Hex20(char* label, int d, word p);
 #define RAISE(S) {fprintf(stderr, "\n*** RAISE: %s\n", (S)); exit(13);}
 #define HL(H,L) ((((word)(H)&255)<<8) | ((word)(L)&255))
 #define UPPER(C) ('a' <= (byte)(C) && (byte)(C) <= 'z' ? (byte)(C)-32 : (byte)(C))
+
+#define UB2OOP(B) (((word)(B)<<1)|1)  // Unsigned byte to oop.
+#define OOP2UB(P) ((byte)((word)(P)>>1))
 
 #endif

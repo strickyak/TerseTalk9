@@ -1,6 +1,6 @@
 all:
 	python genesis.py >&2
-	cc -g -D'DEBUG' vm.c _generated.c -o tt
+	cc -Wall -Werror -D'DEBUG' -g vm.c _generated.c -o tt
 	:
 	:
 	./tt

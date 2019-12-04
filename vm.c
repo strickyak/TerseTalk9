@@ -79,6 +79,10 @@ void Inventory() {
 	fprintf(stderr, "\n");
 }
 
+bool Truth(word x) {
+	return !(x==nilAddr || x==falseAddr || x==1);
+}
+
 word MakeInstance(word cls, word flexbytes, byte flexsize) {
 	Hex20("MakeInstance cls", cls, cls);
 	word p = MemoryLen;

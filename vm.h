@@ -7,6 +7,7 @@
 
 #define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, _x, _y, (Z)); } }
 
+typedef unsigned char bool;
 typedef unsigned char byte;
 typedef unsigned short word;
 
@@ -43,6 +44,8 @@ extern byte FindSymIndex(char* s, byte len);
 extern word FindClassP(char* name, byte len);
 extern void Loop();
 extern void Hex20(char* label, int d, word p);
+// NIL, FALSE, and 0 are false; all else are true.
+extern bool Truth(word x);
 
 #define RAISE(S) {fprintf(stderr, "\n*** RAISE: %s\n", (S)); exit(13);}
 #define HL(H,L) ((((word)(H)&255)<<8) | ((word)(L)&255))

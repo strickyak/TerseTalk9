@@ -453,6 +453,12 @@ class CompilerVisitor(object):
         for i,var in zip(range(len(self.locals)), self.locals):
             self.localindex[var] = i
 
+    def AddLocal(self, var):
+        i = len(self.locals)
+        self.localindex[var] = i
+        self.locals.append(var)
+        return i
+
     def visitSeq(self, p):
         last = p.exprs.pop()
         for e in p.exprs:
@@ -578,6 +584,7 @@ def IfThenMacro(v, varz, exprs):
     IfThenElseMacro(v, varz, exprs)
 
 def IfThenElseMacro(v, varz, exprs):
+    assert all([var is None for var in varz])
     mark1 = Serial()
     mark2 = Serial()
     exprs[0].visit(v)
@@ -588,9 +595,62 @@ def IfThenElseMacro(v, varz, exprs):
     exprs[2].visit(v)
     v.codes.append('/mark/%d' % mark2)
 
+def WhileDoMacro(v, varz, exprs):
+    assert all([var is None for var in varz])
+    mark1 = Serial()
+    mark2 = Serial()
+    v.codes.append('/mark/%d' % mark1)
+    exprs[0].visit(v)
+    v.codes.append('/bfalse/%d' % mark2)
+    exprs[1].visit(v)
+    v.codes.append('/jump/%d' % mark1)
+    v.codes.append('/mark/%d' % mark2)
+
+def ForDoMacro(v, varz, exprs):
+    assert varz[0]
+    assert not varz[1]
+
+    # Create the local variable for Limit:
+    limit = '_tmp_%d' % Serial()
+    lim = v.AddLocal(limit.upper())
+    # Find the index variable.
+    ix = v.AddLocal(varz[0].upper())
+
+    # Store 0 in index.
+    v.codes.append('lit_b')
+    v.codes.append('1')
+    v.codes.append('sto_b')
+    v.codes.append(ix)
+
+    # Evaluate limit.
+    exprs[0].visit(v)
+    v.codes.append('sto_b')
+    v.codes.append(lim)
+
+    mark1 = Serial()
+    mark2 = Serial()
+    v.codes.append('/mark/%d' % mark1)
+
+    # Check for ix reached the limit.
+    v.codes.append('rcl_b')
+    v.codes.append(lim)
+    v.codes.append('rcl_b')
+    v.codes.append(ix)
+    v.codes.append('subtract')
+
+    v.codes.append('/bfalse/%d' % mark2)
+    exprs[1].visit(v)
+    v.codes.append('incr_local_b')
+    v.codes.append(ix)
+    v.codes.append('/jump/%d' % mark1)
+    v.codes.append('/mark/%d' % mark2)
+
+
 MACROS = dict(
         IF_THEN = IfThenMacro,
         IF_THEN_ELSE = IfThenElseMacro,
+        WHILE_DO = WhileDoMacro,
+        FOR_DO = ForDoMacro,
         )
 
 def CompileToCodes(s, cls):
@@ -867,8 +927,11 @@ Method['DEMO']['run2'] = '''T
             acct balance show.
     acct withdraw: 20.
             acct balance show.
-    IF( 5 ) THEN( 5 show ).
-    IF( true ) THEN( 42 show ) ELSE ( 666 show ).
+    IF( 5 )THEN( 5 show ).
+    IF( true )THEN( 42 show )ELSE( 666 show ).
+    n = 3.
+    WHILE( n )DO( n show. n = n - 1. ).
+    FOR( i : 5 )DO( i show ).
 '''
 
 Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.
@@ -908,7 +971,7 @@ Op['reverse_jump_b'] = '''
 Op['forward_bfalse_b'] = '''
     byte n = BYTE(pc); pc += 1;
     word x = POP();
-    if (x == nilAddr || x==falseAddr || x==0) {
+    if (!Truth(x)) {
         pc += n;
     }
 '''
@@ -916,7 +979,7 @@ Op['forward_bfalse_b'] = '''
 Op['reverse_bfalse_b'] = '''
     byte n = BYTE(pc); pc += 1;
     word x = POP();
-    if (x == nilAddr || x==falseAddr || x==0) {
+    if (!Truth(x)) {
         pc -= n;
     }
 '''
@@ -957,11 +1020,12 @@ Op['sto1'] = '  word w = POP(); PUT_WORD(fp-4, w);'
 Op['sto2'] = '  word w = POP(); PUT_WORD(fp-6, w);'
 Op['sto3'] = '  word w = POP(); PUT_WORD(fp-8, w);'
 Op['sto_b'] = ' byte n = BYTE(pc); pc += 1; word w = POP(); PUT_WORD(fp-2*(n+1), w);'
-Op['rcl0'] = '  word w =W(fp-2); PUSH(w);'
-Op['rcl1'] = '  word w =W(fp-4); PUSH(w);'
-Op['rcl2'] = '  word w =W(fp-6); PUSH(w);'
-Op['rcl3'] = '  word w =W(fp-8); PUSH(w);'
-Op['rcl_b'] = ' byte n = BYTE(pc); pc += 1; word w =W(fp-2*(n+1)); PUSH(w);'
+Op['rcl0'] = '  word w = W(fp-2); PUSH(w);'
+Op['rcl1'] = '  word w = W(fp-4); PUSH(w);'
+Op['rcl2'] = '  word w = W(fp-6); PUSH(w);'
+Op['rcl3'] = '  word w = W(fp-8); PUSH(w);'
+Op['rcl_b'] = ' byte n = BYTE(pc); pc += 1; word w = W(fp-2*(n+1)); PUSH(w);'
+Op['incr_local_b'] = 'byte n = BYTE(pc); pc += 1; word p = fp-2*(n+1); word w = W(p); PUT_WORD(p, w+2);'
 
 Op['true'] = '  PUSH(trueAddr);'
 Op['false'] = '  PUSH(falseAddr);'

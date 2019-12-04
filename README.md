@@ -70,11 +70,14 @@ In TerseTalk, return is rarely needed, and is provided by a macro.
 
 ## Macros
 
-Some proposals:
+Existing:
 
     IF ( a ) THEN ( b )
     IF ( a ) THEN ( b ) ELSE ( c )
     WHILE ( a ) DO ( b )
+
+Some proposals:
+
     FOR ( i : list ) DO ( stuff )
     FOR ( i : list ) MAP ( stuff )
     BOTH ( a ) AND ( b )

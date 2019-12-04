@@ -200,6 +200,9 @@ class Parser(object):
                 break
             elif s=='.' or s==';':
                 self.lex.Advance()
+                typ, s, i = self.lex.token
+                if typ=='Z' or s==')' or s=='=':  # If trailing "."
+                    break
             else:
                 raise Exception('EXPECTED EOS or ")" or "." or ";" AFTER %s BEFORE %s' % (repr(self.source[:i]), repr(self.source[i:])))
         return z[0] if len(z)==1 else PSeq(z)
@@ -865,7 +868,7 @@ Method['DEMO']['run2'] = '''T
     acct withdraw: 20.
             acct balance show.
     IF( 5 ) THEN( 5 show ).
-    IF( true ) THEN( 42 show ) ELSE ( 666 show )
+    IF( true ) THEN( 42 show ) ELSE ( 666 show ).
 '''
 
 Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.

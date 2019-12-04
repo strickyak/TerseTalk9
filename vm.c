@@ -108,8 +108,10 @@ word MakeInstance(word cls, word flexbytes, byte flexsize) {
 	}
 	if (flexbytes) {
 		PUT_BYTE(p + basesz, flexsize);
-		for (byte i = 0; i < flexsize; i++) {
-			PUT_BYTE(p + basesz + 1 + i, B(flexbytes+i));
+		if (flexbytes != 0xFFFF) {
+			for (byte i = 0; i < flexsize; i++) {
+				PUT_BYTE(p + basesz + 1 + i, B(flexbytes+i));
+			}
 		}
 	}
 	return p;

@@ -910,6 +910,13 @@ Method['URCLS']['new'] = '''C
     word z = MakeInstance(rcvr, 0, 0);
     PUSH(z);
 '''
+Method['URCLS']['new:'] = '''C
+    word rcvr = W(fp + K_RCVR);
+    fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
+    word n = W(fp + K_ARG1);
+    word z = MakeInstance(rcvr, 0xFFFF, OOP2UB(n));
+    PUSH(z);
+'''
 Method['UR']['bytlen'] = 'B self bytlen'
 Method['UR']['ptrlen'] = 'B self ptrlen'
 Method['UR']['bytat:'] = 'B self a bytat'
@@ -938,6 +945,10 @@ Method['DEMO']['run2'] = '''T
     WHILE( n )DO( n show. n = n - 1. ).
     FOR( i : 5 )DO( i show ).
 
+    p = ArrByt new: 5.
+    FOR( i : 5 )DO( p bytAt: i put: 10 + i ).
+    FOR( i : 5 )DO( (p bytAt: i) show ).
+    p bytLen show.
 
 '''
 
@@ -971,13 +982,16 @@ Op['bytlen'] = '''
     word p = PEEK(0); word pcls = CLASSOF(p);
     CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_BYTES, p);
     byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    POKE(0, B(p + flex_at));
+    byte len = B(p + flex_at);
+    POKE(0, UB2OOP(len));
+    Hex20("bytlen obj", flex_at, p);
 '''
 Op['ptrlen'] = '''
     word p = PEEK(0); word pcls = CLASSOF(p);
     CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_PTRS, p);
     byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    POKE(0, B(p + flex_at)>>1);
+    byte len = B(p + flex_at)>>1;
+    POKE(0, UB2OOP(len));
 '''
 Op['bytat'] = '''
     word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);
@@ -1205,6 +1219,28 @@ Op['call1_b'] = '''
   pc = meth + METH_FLEXSIZE + 1;
 '''
 
+Op['call2_b'] = '''
+  byte msg = BYTE(pc);
+  pc += 1;
+  word rcvr = PEEK(0); 
+  
+  PUSH(msg);
+  PUSH(0xDE02);  // This is all that changes..... TODO
+  PUSH(pc);
+  PUSH(fp);
+  fprintf(stderr, "Old FP = $%04x\\n", fp);
+  fp = sp;
+  fprintf(stderr, "New FP = $%04x\\n", fp);
+  Hex20("STACK fp,pc,de,msg,rcvr...", sp, sp);
+
+  word meth = FindMethBySymbolNumber(rcvr, msg);
+  byte i;
+  for (i=0; i<B(meth + METH_B_numL); i++) {
+    PUSH(nilAddr);
+  }
+  pc = meth + METH_FLEXSIZE + 1;
+'''
+
 Op['call'] = '''
   word rcvr = PEEK(4); 
   Hex20("call--rcvr", rcvr, rcvr);
@@ -1377,7 +1413,7 @@ def CompileMethod(cname, mname, v):
 
     if v[0] == 'C':
         # Create an opcode for the C code.
-        opname = ('%s_%s_c' % (cname, mname)).upper()
+        opname = ('%s_%s_c' % (cname, mname)).upper().replace(':', '_')
         Op[opname] = v[1:]
         opnum = len(OpList)
         OpList.append(opname)

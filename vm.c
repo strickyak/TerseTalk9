@@ -51,7 +51,7 @@ void fprintSymNum(FILE* fd, char* message, byte symNum) {
 	byte len = B(sym + SLICE_B_len);
 	Hex20("(sym)", symNum, sym);
 	Hex20("(guts)", symNum, guts);
-	fprintN(fd, message, guts + FLEXB_FLEXSIZE + 1 + begin, len);
+	fprintN(fd, message, guts + ARRBYT_FLEXSIZE + 1 + begin, len);
 }
 
 void Inventory() {
@@ -86,9 +86,9 @@ bool Truth(word x) {
 word MakeInstance(word cls, word flexbytes, byte flexsize) {
 	Hex20("MakeInstance cls", cls, cls);
 	word p = MemoryLen;
-	byte flags = B(cls + CLASS_B_flags);
+	byte flags = B(cls + CLS_B_flags);
 	fprintf(stderr, "MakeInstance... flags=%02x", flags);
-	byte basesz = B(cls + CLASS_B_numB) + 2*B(cls + CLASS_B_numP);
+	byte basesz = B(cls + CLS_B_numB) + 2*B(cls + CLS_B_numP);
 	fprintf(stderr, "MakeInstance... basesz=%02x", basesz);
 	byte sz = basesz;
 	if (flexbytes) {
@@ -102,7 +102,7 @@ word MakeInstance(word cls, word flexbytes, byte flexsize) {
 	MemoryLen += sz;
 
 	PUT_BYTE(p + UR_B_gcsize, sz>>1);
-	PUT_BYTE(p + UR_B_cls, B(cls + CLASS_B_this));
+	PUT_BYTE(p + UR_B_cls, B(cls + CLS_B_this));
 	for (byte i = 2; i < basesz; i++) {
 		PUT_BYTE(p+i, 0);
 	}
@@ -132,8 +132,8 @@ word FindMethBySymbolNumber(word rcvr, byte symNum) {
 	if (symNum >= SymVecLen) RAISE("BadSymNum");
 	while (cls) {
 		Hex20("Find Meth cls", cls, cls);
-		fprintN(stderr, "... cls=", cls + CLASS_FLEXSIZE + 1, B(cls + CLASS_FLEXSIZE));
-		word meth = W(cls + CLASS_P_meths);
+		fprintN(stderr, "... cls=", cls + CLS_FLEXSIZE + 1, B(cls + CLS_FLEXSIZE));
+		word meth = W(cls + CLS_P_meths);
 		while (meth) {
 			Hex20("Find Meth meth", meth, meth);
 			fprintSymNum(stderr, "... try meth=", B(meth + NAMED_B_name));
@@ -142,7 +142,7 @@ word FindMethBySymbolNumber(word rcvr, byte symNum) {
 			}
 			meth = W(meth + METH_P_next);
 		}
-		cls = W(cls + CLASS_P_sup);
+		cls = W(cls + CLS_P_sup);
 	}
 	RAISE("MethodNotFound");
 }
@@ -155,7 +155,7 @@ byte FindSymIndex(char* s, byte len) {
 
 		word off = B(y + SYM_B_begin);
 		word x = W(y + SYM_P_guts);
-		word p = x + FLEXB_FLEXSIZE + 1 + off;
+		word p = x + ARRBYT_FLEXSIZE + 1 + off;
 		byte eq = 1;
 		for (int j = 0; j < len; j++ ) {
 			if (UPPER(B(p+j)) != UPPER(s[j])) {
@@ -172,9 +172,9 @@ word FindClassP(char* name, byte len) {
 	for (int i = 1; i < ClassVecLen; i++) {
 		word c = ClassVec[i];
 		//Hex20("someclass", i, c);
-		//Hex20("flexsize", CLASS_FLEXSIZE, c+CLASS_FLEXSIZE);
-		if (B(c + CLASS_FLEXSIZE) != len) continue;
-		word p = c + CLASS_FLEXSIZE + 1;
+		//Hex20("flexsize", CLS_FLEXSIZE, c+CLS_FLEXSIZE);
+		if (B(c + CLS_FLEXSIZE) != len) continue;
+		word p = c + CLS_FLEXSIZE + 1;
 		//Hex20("test-------=======", i, p);
 		byte eq = 1;
 		for (int j = 0; j < len; j++ ) {

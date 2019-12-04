@@ -750,7 +750,6 @@ class Memorable(object):
                 else:
                   raise Exception('Weird kind: %s' % type(v))
         fb = getattr(self, 'flexbytes', None)
-        #if type(self) is FlexB: print 'FlexB:', fb, self
         print ':fb:', self.basesize, fb, self
         if fb is not None:
             Memory[self.addr + self.basesize] = len(fb)
@@ -793,32 +792,32 @@ class Addr(Num):  # 16-bit unsigned integer.
     B_hi = 2
     B_lo = 3
 
-class NilClass(Obj):  # nil Class.
+class NilCls(Obj):  # nil Class.
     pass
 
 class Bool(Obj):
     pass
 
-class TrueClass(Bool):  # true Class.
+class TrueCls(Bool):  # true Class.
     pass
-Method['trueclass']['must'] = 'B'
-Method['trueclass']['not'] = 'B False '
+Method['truecls']['must'] = 'B'
+Method['truecls']['not'] = 'B False '
 
-class FalseClass(Bool):  # false Class.
+class FalseCls(Bool):  # false Class.
     pass
-Method['falseclass']['must'] = 'C CHECK3(1, 2, pc); '
-Method['falseclass']['not'] = 'B True '
+Method['falsecls']['must'] = 'C CHECK3(1, 2, pc); '
+Method['falsecls']['not'] = 'B True '
 
-class Flex(Obj):  # LowLevel: Flexible-length abstract object.
+class Arr(Obj):  # LowLevel: Flexible-length abstract object.
     pass
 
-class FlexB(Flex):  # LowLevel: Flexible-length bytes storage.
+class ArrByt(Arr):  # LowLevel: Flexible-length bytes storage.
     FLEX_BYTES = 2
 
-class FlexP(Flex):  # LowLevel: Flexible-length oops storage.
+class ArrPtr(Arr):  # LowLevel: Flexible-length oops storage.
     FLEX_PTRS = 2
 
-class Tuple(FlexP):  # Tuple: uses fixed FlexP.
+class Tuple(ArrPtr):  # Tuple: uses fixed FlexP.
     pass
 
 class Slice(Obj):  # LowLevel: Slice of a Flx.
@@ -849,8 +848,8 @@ class Named(Obj):  # Object with interned name.
 
 K_FLEX_BYTES = 1
 K_FLEX_PTRS = 2
-class Class(Obj):
-    B_flags = 2  # e.g. FlexB, FlexP.
+class Cls(Obj):
+    B_flags = 2  # e.g. K_FLEX_BYTES, K_FLEX_PTRS
     B_numB = 3   # Number of byte slots.
     B_numP = 4   # Number of Oop slots.
     B_this = 5   # This class index.
@@ -859,7 +858,7 @@ class Class(Obj):
     P_meths = 9   # Head of linked list of meths.
     FLEX_BYTES = 11 # For the name of the class, so it does not have to be interned.
 
-class Metaclass(Class):
+class Metacls(Cls):
     pass
 
 class Meth(Named):
@@ -1209,7 +1208,7 @@ for k, v in globals().items():
         Konsts[k] = v
 
 # First create NIL, FALSE, TRUE instances, in that order.
-NIL, FALSE, TRUE = NilClass(), FalseClass(), TrueClass()
+NIL, FALSE, TRUE = NilCls(), FalseCls(), TrueCls()
 NIL.Reify(), FALSE.Reify(), TRUE.Reify()
 
 def FixSlotsOnClass(c, inst):
@@ -1244,7 +1243,7 @@ def FixSlotsOnClass(c, inst):
 # Create class objects.
 ClassDict = {}
 for c in AllClassesPreorder():
-    inst = Class()
+    inst = Cls()
     inst.pycls = c
     inst.nick = c.__name__
     inst.name = c.__name__.upper()
@@ -1261,9 +1260,9 @@ for c in AllClassesPreorder():
     FixSlotsOnClass(c, inst)
 
 # Create metaclass objects.
-METACLASS = ClassDict['METACLASS']
+METACLS = ClassDict['METACLS']
 for c in AllClassesPreorder():
-    meta = Metaclass()
+    meta = Metacls()
     meta.nick = c.__name__ + 'ClS'
     meta.name = c.__name__.upper() + 'CLS'
     if True:
@@ -1276,18 +1275,17 @@ for c in AllClassesPreorder():
         meta.flexbytes = []
     meta.b_this = len(ClassDict) + 1  # Skip the 0 class, meaning unused.
     ClassVec[meta.b_this] = meta
-    meta.p_sup = ClassDict['CLASS'] if c is Ur else ClassDict[c.__bases__[0].__name__.upper() + 'CLS']
+    meta.p_sup = ClassDict['CLS'] if c is Ur else ClassDict[c.__bases__[0].__name__.upper() + 'CLS']
     meta.sup = meta.p_sup
     meta.p_meths = NIL
     meta.Reify()
     ClassDict[meta.name] = meta
-    FixSlotsOnClass(METACLASS, meta)
+    FixSlotsOnClass(METACLS, meta)
 
 # Link metaclass class objects.
 for c in AllClassesPreorder():
     meta = ClassDict[c.__name__.upper() + 'CLS']
-    #meta.cls = METACLASS
-    meta.b_cls = METACLASS.b_this
+    meta.b_cls = METACLS.b_this
     inst = ClassDict[c.__name__.upper()]
     inst.b_cls = meta.b_this
     inst.b_partner = meta.b_this
@@ -1435,7 +1433,7 @@ for (k, v) in InternDict.items():
 # Reify the packed strings.
 PackedList = []
 for ps in PackedStrings:
-    po = FlexB()
+    po = ArrByt()
     po.flexstring = ps
     po.flexsize = len(ps)
     po.flexbytes = [ord(s) for s in ps]

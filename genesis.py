@@ -910,6 +910,12 @@ Method['URCLS']['new'] = '''C
     word z = MakeInstance(rcvr, 0, 0);
     PUSH(z);
 '''
+Method['UR']['bytlen'] = 'B self bytlen'
+Method['UR']['ptrlen'] = 'B self ptrlen'
+Method['UR']['bytat:'] = 'B self a bytat'
+Method['UR']['ptrat:'] = 'B self a ptrat'
+Method['UR']['bytat:put:'] = 'B b self a bytputat'
+Method['UR']['ptrat:put:'] = 'B b self a ptrputat'
 
 Method['DEMO']['run'] = '''B
     lit_b 51 self #double: lit_w %d %d call dup show
@@ -956,6 +962,55 @@ Op['b'] = '  PUSH(W(fp+K_ARG2));'
 Op['c'] = '  PUSH(W(fp+K_ARG3));'
 Op['d'] = '  PUSH(W(fp+K_ARG4));'
 Op['cls_b'] = ' byte n = BYTE(pc); pc += 1; PUSH(ClassVec[n]); '
+
+Op['clsof'] = ' word x = PEEK(0); POKE(0, CLASSOF(x)); '
+
+Op['bytlen'] = '''
+    word p = PEEK(0); word pcls = CLASSOF(p);
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_BYTES, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    POKE(0, B(p + flex_at));
+'''
+Op['ptrlen'] = '''
+    word p = PEEK(0); word pcls = CLASSOF(p);
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_PTRS, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    POKE(0, B(p + flex_at)>>1);
+'''
+Op['bytat'] = '''
+    word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_PTRS, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    word lim = B(p + flex_at);
+    CHECK3(i < lim, 1, p);
+    POKE(0, B(p + flex_at + 1 + i));
+'''
+Op['bytputat'] = '''
+    word i = POP(); word p = POP(); word pcls = CLASSOF(p);
+    word val = POP();
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_BYTES, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    word lim = B(p + flex_at);
+    CHECK3(i < lim, 1, p);
+    PUT_BYTE(p + flex_at + 1 + i, val);
+'''
+Op['ptrat'] = '''
+    word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_PTRS, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    word lim = B(p + flex_at);
+    CHECK3(i*2 < lim, 1, p);
+    POKE(0, W(p + flex_at + 1 + 2*i));
+'''
+Op['ptrputat'] = '''
+    word i = POP(); word p = POP(); word pcls = CLASSOF(p);
+    word val = POP();
+    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_BYTES, p);
+    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
+    word lim = B(p + flex_at);
+    CHECK3(i*2 < lim, 1, p);
+    PUT_WORD(p + flex_at + 1 + 2*i, val);
+'''
 
 Op['forward_jump_b'] = '''
     byte n = BYTE(pc); pc += 1;

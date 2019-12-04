@@ -54,4 +54,6 @@ extern bool Truth(word x);
 #define UB2OOP(B) (((word)(B)<<1)|1)  // Unsigned byte to oop.
 #define OOP2UB(P) ((byte)((word)(P)>>1))
 
+#define CLASSOF(X) ((X)&1 ? intClassAddr : ClassVec[B((X) + CLS_B_cls)])
+
 #endif

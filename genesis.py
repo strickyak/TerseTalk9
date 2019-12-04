@@ -232,12 +232,12 @@ class Parser(object):
         return z[0] if len(z)==1 else PList(z)
 
     def ParseMacro(self, name):
+        typ, s, i = self.lex.token
         keywords = [name]
         varz = []
         exprs = []
         while True:
-            if len(keywords) == len(varz):
-                # We know we're looking at the next keyword.
+            if varz: # Not the first time:
                 keywords.append(s)
 
                 # next comes the open paren
@@ -246,9 +246,9 @@ class Parser(object):
                 if s != '(':
                     raise Exception('Expected "(" in macro AFTER %s BEFORE %s' % (repr(self.source[:i]), repr(self.source[i:])))
                 self.lex.Advance()
+                typ, s, i = self.lex.token
 
             var = None
-            typ, s, i = self.lex.token
             if typ == 'C':
                 var = LEX_COLON(s).group(2)  # extract word.
                 self.lex.Advance()
@@ -559,11 +559,36 @@ class CompilerVisitor(object):
         self.codes.append('call%d_b' % len(args))
         self.codes.append(InternDict[p.meth])
     def visitMacro(self, p):
-        name = '_'.join(self.keywords)
+        name = '_'.join(p.keywords)
         macro = MACROS[name]
-        macro.compile(self, p.vars, p.exprs)
+        macro(self, p.vars, p.exprs)
 
-MACROS = []
+_Serial = 0
+def Serial():
+    global _Serial
+    _Serial += 1
+    return _Serial
+
+def IfThenMacro(v, varz, exprs):
+    varz.append(None)
+    exprs.append(PVar('NIL'))
+    IfThenElseMacro(v, varz, exprs)
+
+def IfThenElseMacro(v, varz, exprs):
+    mark1 = Serial()
+    mark2 = Serial()
+    exprs[0].visit(v)
+    v.codes.append('/bfalse/%d' % mark1)
+    exprs[1].visit(v)
+    v.codes.append('/jump/%d' % mark2)
+    v.codes.append('/mark/%d' % mark1)
+    exprs[2].visit(v)
+    v.codes.append('/mark/%d' % mark2)
+
+MACROS = dict(
+        IF_THEN = IfThenMacro,
+        IF_THEN_ELSE = IfThenElseMacro,
+        )
 
 def CompileToCodes(s, cls):
     p = Parser(s).Parse()
@@ -583,6 +608,7 @@ Intern("")  # Empty string is intern index 0.
 CLASS_PATTERN = re.compile("^@([A-Za-z0-9_:]+)$").match
 SYM_PATTERN = re.compile("^#([A-Za-z0-9_:]+)$").match
 INT_PATTERN = re.compile("^-?[0-9]+$").match
+MARK_PATTERN = re.compile("^/([a-z]+)/([0-9]+)$").match
 
 def EvalInt(s):
     z = 0
@@ -837,7 +863,9 @@ Method['DEMO']['run2'] = '''T
     acct deposit: 100.
             acct balance show.
     acct withdraw: 20.
-            acct balance show
+            acct balance show.
+    IF( 5 ) THEN( 5 show ).
+    IF( true ) THEN( 42 show ) ELSE ( 666 show )
 '''
 
 Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.
@@ -863,6 +891,32 @@ Op['b'] = '  PUSH(W(fp+K_ARG2));'
 Op['c'] = '  PUSH(W(fp+K_ARG3));'
 Op['d'] = '  PUSH(W(fp+K_ARG4));'
 Op['cls_b'] = ' byte n = BYTE(pc); pc += 1; PUSH(ClassVec[n]); '
+
+Op['forward_jump_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    pc += n;
+'''
+
+Op['reverse_jump_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    pc -= n;
+'''
+
+Op['forward_bfalse_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word x = POP();
+    if (x == nilAddr || x==falseAddr || x==0) {
+        pc += n;
+    }
+'''
+
+Op['reverse_bfalse_b'] = '''
+    byte n = BYTE(pc); pc += 1;
+    word x = POP();
+    if (x == nilAddr || x==falseAddr || x==0) {
+        pc -= n;
+    }
+'''
 
 # Get/Put pointer slots.
 Op['getp_b'] = '''
@@ -1214,6 +1268,8 @@ def CompileMethod(cname, mname, v):
     explain, codes = [], []
     ww = v.split()
     print 'Compiling (%s %s): %s' % (cname, mname, ww)
+    Marks = {}
+    Fixes = []
     for w in ww:
         if INT_PATTERN(w):
             explain.append(EvalInt(w))
@@ -1231,6 +1287,21 @@ def CompileMethod(cname, mname, v):
             explain.append(c.b_this)
             codes.append(OpNums['CLASS_B'])
             codes.append(c.b_this)
+        elif MARK_PATTERN(w):
+            verb, target = MARK_PATTERN(w).groups()
+            target = int(target)
+            if verb == 'mark':
+                Marks[target] = len(codes)
+            elif verb == 'jump':
+                Fixes.append((target, len(codes)))
+                codes.append('jump_b')
+                codes.append(0)
+            elif verb == 'bfalse':
+                Fixes.append((target, len(codes)))
+                codes.append('bfalse_b')
+                codes.append(0)
+            else:
+                raise 'bad'
         else:
             num = OpNums.get(w.upper())
             if num is None:
@@ -1239,6 +1310,16 @@ def CompileMethod(cname, mname, v):
             codes.append(OpNums[w.upper()])
     explain.append('RETURN');
     codes.append(OpNums['RETURN']);
+
+    for (mark, loc) in Fixes:
+        target = Marks[mark]
+        if target < loc:
+            codes[loc] = OpNums[('reverse_' + codes[loc]).upper()]
+            codes[loc+1] = loc + 2 - target
+        else:
+            codes[loc] = OpNums[('forward_' + codes[loc]).upper()]
+            codes[loc+1] = target - loc - 2
+
     print 'CompileMethod: %s %s: %s' % (cname, mname, explain)
     print 'CompileMethod: %s %s: %s' % (cname, mname, codes)
     return explain, codes, numL

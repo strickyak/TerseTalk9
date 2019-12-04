@@ -937,6 +937,8 @@ Method['DEMO']['run2'] = '''T
     n = 3.
     WHILE( n )DO( n show. n = n - 1. ).
     FOR( i : 5 )DO( i show ).
+
+
 '''
 
 Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.
@@ -983,7 +985,8 @@ Op['bytat'] = '''
     byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
     word lim = B(p + flex_at);
     CHECK3(i < lim, 1, p);
-    POKE(0, B(p + flex_at + 1 + i));
+    byte val = B(p + flex_at + 1 + i);
+    POKE(0, UB2OOP(val));
 '''
 Op['bytputat'] = '''
     word i = POP(); word p = POP(); word pcls = CLASSOF(p);
@@ -992,7 +995,7 @@ Op['bytputat'] = '''
     byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
     word lim = B(p + flex_at);
     CHECK3(i < lim, 1, p);
-    PUT_BYTE(p + flex_at + 1 + i, val);
+    PUT_BYTE(p + flex_at + 1 + i, OOP2UB(val));
 '''
 Op['ptrat'] = '''
     word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);

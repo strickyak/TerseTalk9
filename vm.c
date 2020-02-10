@@ -5,7 +5,7 @@
 #include "vm.h"
 #include "_generated.h"
 
-word MemoryLen, SymVecLen, ClassVecLen;
+word Here, SymVecLen, ClassVecLen;
 byte Memory[0x10000];
 word SymVec[0x100];
 word ClassVec[0x100];
@@ -49,9 +49,16 @@ void fprintSymNum(FILE* fd, char* message, byte symNum) {
 	word guts = W(sym + SLICE_P_guts);
 	byte begin = B(sym + SLICE_B_begin);
 	byte len = B(sym + SLICE_B_len);
+
+    //word sz = ((B(guts+URCLS_B_gcsize)&127)<<1)+2;
+		//Hex20("sz", sz, guts+CLS_FLEXSIZE);
+    //word final = B(guts+sz-1);
+		//Hex20("final", final, guts+CLS_FLEXSIZE);
+    //word name_len = sz - CLS_FLEXSIZE - (final==0);
+
 	Hex20("(sym)", symNum, sym);
 	Hex20("(guts)", symNum, guts);
-	fprintN(fd, message, guts + ARRBYT_FLEXSIZE + 1 + begin, len);
+	fprintN(fd, message, guts + ARRBYT_FLEXSIZE + begin, len);
 }
 
 void Inventory() {
@@ -85,21 +92,21 @@ bool Truth(word x) {
 
 word MakeInstance(word cls, word flexbytes, byte flexsize) {
 	Hex20("MakeInstance cls", cls, cls);
-	word p = MemoryLen;
+	word p = Here;
 	byte flags = B(cls + CLS_B_flags);
 	fprintf(stderr, "MakeInstance... flags=%02x", flags);
 	byte basesz = B(cls + CLS_B_numB) + 2*B(cls + CLS_B_numP);
 	fprintf(stderr, "MakeInstance... basesz=%02x", basesz);
 	byte sz = basesz;
 	if (flexbytes) {
-		sz += 1 + flexsize;  // add flex if needed.
+		sz += flexsize;  // add flex if needed.
 		if(flags == 0) RAISE("ShouldHaveFlexFlag");
 	} else {
 		if(flags != 0) RAISE("ShouldNotHaveFlexFlag");
 	}
 	if (sz&1) sz++;  // even-align.
 	fprintf(stderr, "MakeInstance... sz=%02x", sz);
-	MemoryLen += sz;
+	Here += sz;
 
 	PUT_BYTE(p + UR_B_gcsize, sz>>1);
 	PUT_BYTE(p + UR_B_cls, B(cls + CLS_B_this));
@@ -150,6 +157,8 @@ word FindMethBySymbolNumber(word rcvr, byte symNum) {
 }
 
 byte FindSymIndex(char* s, byte len) {
+  Hex20("FindSymIndex", len, 0);
+  Hex20(s, len, 0);
 	for (byte i = 0; i < SymVecLen; i++) {
 		//fprintSymNum(stderr, ".......... try", i);
 		word y = SymVec[i];
@@ -157,7 +166,7 @@ byte FindSymIndex(char* s, byte len) {
 
 		word off = B(y + SYM_B_begin);
 		word x = W(y + SYM_P_guts);
-		word p = x + ARRBYT_FLEXSIZE + 1 + off;
+		word p = x + ARRBYT_FLEXSIZE + off;
 		byte eq = 1;
 		for (int j = 0; j < len; j++ ) {
 			if (UPPER(B(p+j)) != UPPER(s[j])) {
@@ -167,22 +176,31 @@ byte FindSymIndex(char* s, byte len) {
 		}
 		if (eq) return i;
 	}
-	RAISE("SymNotFound");
+	RAISE("FindSymIndex:SymNotFound");
 }
 
 word FindClassP(char* name, byte len) {
+	Hex20("FindClassP", len, 0);
+	Hex20(name, len, 0);
 	for (int i = 1; i < ClassVecLen; i++) {
 		word c = ClassVec[i];
-		//Hex20("someclass", i, c);
-		//Hex20("flexsize", CLS_FLEXSIZE, c+CLS_FLEXSIZE);
-		if (B(c + CLS_FLEXSIZE) != len) continue;
-		word p = c + CLS_FLEXSIZE + 1;
-		//Hex20("test-------=======", i, p);
+		Hex20("someclass", i, c);
+
+    word sz = ((B(c+URCLS_B_gcsize)&127)<<1)+2;
+		Hex20("sz", sz, c+CLS_FLEXSIZE);
+    word final = B(c+sz-1);
+		Hex20("final", final, c+CLS_FLEXSIZE);
+    word name_len = sz - CLS_FLEXSIZE - (final==0);
+		Hex20("name_len", name_len, c+CLS_FLEXSIZE);
+		if (name_len != len) continue;
+
+		word p = c + CLS_FLEXSIZE;
+		Hex20("test-------=======", i, p);
 		byte eq = 1;
 		for (int j = 0; j < len; j++ ) {
-			//Hex20("j--------------", j, p);
-			//Hex20("left--------------", UPPER(B(p+j)), p);
-			//Hex20("right--------------", UPPER(name[j]), p);
+			Hex20("j--------------", j, p);
+			Hex20("left--------------", UPPER(B(p+j)), p);
+			Hex20("right--------------", UPPER(name[j]), p);
 			if (UPPER(B(p+j)) != UPPER(name[j])) {
 				eq = 0;
 				break;
@@ -204,6 +222,7 @@ void LoadImage(char* filename) {
 		word hi = getc(fd);
 		word lo = getc(fd);
 		word len = HL(hi,lo);
+    CHECK3(b, '/', b);
 
 		int i;
 		fprintf(stderr, "A:%u B:%u len:%u\n", a, b, len);
@@ -228,13 +247,13 @@ void LoadImage(char* filename) {
 			}
 			break;
 		case 'M':
-			MemoryLen = len;
-			for (i=0; i<MemoryLen; i++) {
+			Here = len;
+			for (i=0; i<Here; i++) {
 				Memory[i] = getc(fd);
 			}
 			break;
-		case 0:
-			goto STOP;
+		case '!':
+			goto FINISH;
 			break;
 		default:
 			RAISE("BadSegment");
@@ -242,7 +261,7 @@ void LoadImage(char* filename) {
 		}
 
 	}
-STOP:
+FINISH:
 	fclose(fd);
 }
 
@@ -302,6 +321,9 @@ void RunDemo() {
 }
 
 int main() {
+  CHECK3(sizeof(byte), 1, sizeof(byte));
+  CHECK3(sizeof(word), 2, sizeof(word));
+
 	LoadImage("_generated.image");
 	intClassAddr = FindClassP("INT", 3);
 	fprintf(stderr, "intClassAddr=%04x\n", intClassAddr);

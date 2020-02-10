@@ -12,10 +12,9 @@ SYM_VEC_LEN = 256
 CLASS_VEC_LEN = 256
 
 # Leave a little gap for future overhead.
-MAX_OBJ_SIZE = 250
-MAX_FLEX_BYTES = 240
-MAX_FLEX_PTRS = 120
-PAGE_CEILING = 254
+MAX_OBJ_SIZE = 258
+MAX_FLEX_BYTES = 256
+MAX_FLEX_PTRS = 128
 
 # Target memory.
 Memory = MEMORY_LEN * ['#']
@@ -712,35 +711,31 @@ class Memorable(object):
         self.size = self.basesize
         fs = getattr(self, 'flexsize', None)
         if fs is not None:
-            self.size += 1 + fs
+            self.size += fs
         if self.size & 1:
-            self.padded = True
+            self.padded = 1
             self.size += 1   # Final size must be even.
         else:
-            self.padded = False
+            self.padded = 0
+        if self.size < 4:
+            self.padded = 4 - self.size
+            self.size = 4
         self.addr = Here
-        hi = Hi(self.addr)
-        ceiling = (hi<<8) | PAGE_CEILING # Save 2 bytes at end.
-        if self.addr + self.size >= ceiling:
-            # Doesn't fit in this page.
-            Memory[self.addr | 255] = '@'      # Visual marks at end of page.
-
-            Here = (hi+1)<<8
-            self.addr = Here
         Here += self.size
         MemorableList.append(self)
 
     def Materialize(self):
+        print 'Materialize:', self
         for k,v in vars(self).items():
             if k.startswith('b_'):
                 k2 = 'B_' + k[2:]
-                v2 = getattr(m, k2)
-                print m, k, v, k2, v2
+                v2 = getattr(self, k2)
+                print self, k, v, k2, v2
                 Memory[self.addr + v2] = v
             if k.startswith('p_'):
                 k2 = 'P_' + k[2:]
-                v2 = getattr(m, k2)
-                print m, k, v, k2, v2
+                v2 = getattr(self, k2)
+                print self, k, v, k2, v2
                 if isinstance(v, Memorable):
                   Memory[self.addr + v2] = Hi(v.addr)
                   Memory[self.addr + v2 + 1] = Lo(v.addr)
@@ -752,13 +747,12 @@ class Memorable(object):
         fb = getattr(self, 'flexbytes', None)
         print ':fb:', self.basesize, fb, self
         if fb is not None:
-            Memory[self.addr + self.basesize] = len(fb)
-            i = 1
+            i = 0
             for b in fb:
                 Memory[self.addr + self.basesize + i] = b
                 i += 1
-        if self.padded:
-            Memory[self.addr + self.size - 1] = '^'
+        for i in range(self.padded):
+            Memory[self.addr + self.size - 1 - i] = '^'
 
     def BaseByteSize(self):
         self.Bslots = [k for k in dir(self) if k.startswith('B_')]
@@ -792,21 +786,17 @@ class Addr(Num):  # 16-bit unsigned integer.
     B_hi = 2
     B_lo = 3
 
-class NilCls(Obj):  # nil Class.
+class NilT(Obj):  # class of nil
     pass
 
 class Bool(Obj):
     pass
 
-class TrueCls(Bool):  # true Class.
+class TrueT(Bool):  # class of true
     pass
-Method['truecls']['must'] = 'B'
-Method['truecls']['not'] = 'B False '
 
-class FalseCls(Bool):  # false Class.
+class FalseT(Bool):  # class of false
     pass
-Method['falsecls']['must'] = 'C CHECK3(1, 2, pc); '
-Method['falsecls']['not'] = 'B True '
 
 class Arr(Obj):  # LowLevel: Flexible-length abstract object.
     pass
@@ -823,7 +813,7 @@ class Tuple(ArrPtr):  # Tuple: uses fixed FlexP.
 class Slice(Obj):  # LowLevel: Slice of a Flx.
     B_begin = 2
     B_len = 3
-    B_num = 4   # used in Sym for intern number.
+    B_intern = 4   # used in Sym for intern number.
     P_guts = 5
 
 class Vec(Slice):  # Vector of Pointers.
@@ -917,12 +907,23 @@ Method['URCLS']['new:'] = '''C
     word z = MakeInstance(rcvr, 0xFFFF, OOP2UB(n));
     PUSH(z);
 '''
+Method['UR']['same'] = 'B self a same'
+Method['UR']['=='] = 'B self a same'
+Method['UR']['must'] = 'B self must self'  # Most objects are true.
+Method['UR']['not'] = 'B self not'  # Most objects are true.
+
 Method['UR']['bytlen'] = 'B self bytlen'
 Method['UR']['ptrlen'] = 'B self ptrlen'
 Method['UR']['bytat:'] = 'B self a bytat'
 Method['UR']['ptrat:'] = 'B self a ptrat'
-Method['UR']['bytat:put:'] = 'B b self a bytputat'
-Method['UR']['ptrat:put:'] = 'B b self a ptrputat'
+Method['UR']['bytat:put:'] = 'B b self a bytputat nil'
+Method['UR']['ptrat:put:'] = 'B b self a ptrputat nil'
+Method['ARRBYT']['bytlen'] = 'B self bytlen'
+Method['ARRBYT']['at:'] = 'B self a bytat'
+Method['ARRBYT']['at:put:'] = 'B b self a bytputat nil'
+Method['ARRPTR']['ptrlen'] = 'B self ptrlen'
+Method['ARRPTR']['at:'] = 'B self a ptrat'
+Method['ARRPTR']['at:put:'] = 'B b self a ptrputat nil'
 
 Method['DEMO']['run'] = '''B
     lit_b 51 self #double: lit_w %d %d call dup show
@@ -948,6 +949,7 @@ Method['DEMO']['run2'] = '''T
     p = ArrByt new: 5.
     FOR( i : 5 )DO( p bytAt: i put: 10 + i ).
     FOR( i : 5 )DO( (p bytAt: i) show ).
+    FOR( i : 5 )DO( ((p bytAt: i) == i) must ).
     p bytLen show.
 
 '''
@@ -977,6 +979,7 @@ Op['d'] = '  PUSH(W(fp+K_ARG4));'
 Op['cls_b'] = ' byte n = BYTE(pc); pc += 1; PUSH(ClassVec[n]); '
 
 Op['clsof'] = ' word x = PEEK(0); POKE(0, CLASSOF(x)); '
+Op['same'] = ' word x = POP(); word y = PEEK(0); POKE(0, (x==y));'
 
 Op['bytlen'] = '''
     word p = PEEK(0); word pcls = CLASSOF(p);
@@ -1152,9 +1155,12 @@ Op['lognum'] = '''
   fprintf(stderr, "%04x:=:%04x ", id, value);
 '''
 Op['must'] = '''
-  word expected = POP();
-  word got = PEEK(0);
-  CHECK3(got, expected, pc);
+  word x = POP();
+  CHECK3(Truth(x), 1, pc);
+'''
+Op['not'] = '''
+  word x = PEEK(0);
+  POKE(0, Truth(x) ? trueAddr : falseAddr);
 '''
 Op['add'] = '''
   word a = POP();
@@ -1302,7 +1308,7 @@ for k, v in globals().items():
         Konsts[k] = v
 
 # First create NIL, FALSE, TRUE instances, in that order.
-NIL, FALSE, TRUE = NilCls(), FalseCls(), TrueCls()
+NIL, FALSE, TRUE = NilT(), FalseT(), TrueT()
 NIL.Reify(), FALSE.Reify(), TRUE.Reify()
 
 def FixSlotsOnClass(c, inst):
@@ -1520,7 +1526,7 @@ for (k, v) in InternDict.items():
 # Reify the interned symbols.
 for (k, v) in InternDict.items():
     sym = Sym()
-    sym.b_num = v
+    sym.b_intern = v
     sym.Reify()
     SymVec[v] = sym
     InternSym[k] = sym
@@ -1544,9 +1550,11 @@ for (k, v) in InternSym.items():
     v.p_guts = PackedList[packNum-1].addr
 
 for m in MemorableList:
-    m.b_gcsize = (m.size>>1, m.nick, m.addr, m.basesize, m.__class__.__name__)
-    #m.CLS = ClassDict[m.__class__.__name__.upper()]
-    #m.b_cls = m.CLS.b_this
+    m.b_gcsize = ((m.size-2)>>1, m.nick, m.addr, m.basesize, m.__class__.__name__)
+    assert m.b_gcsize[0] > 0, vars(m)
+    assert m.b_gcsize[0] < 128, vars(m)
+    m.CLS = ClassDict[m.__class__.__name__.upper()]
+    m.b_cls = m.CLS.b_this
     m.Materialize()
 
 pass;pass;pass
@@ -1678,15 +1686,15 @@ def GenerateImage():
     n = Here
     w('M/'); w2(n)
     for x in Memory[:n]:
-        if x == '^': w1(0xFC)    # padding
-        elif x == '#': w1(0)     # unused part of page
-        elif x == '@': w1(0xFE)  # last in page
+        if x == '^': w1(0)    # padding
+        #elif x == '#': raise 'bad' # w1(0)     # unused part of page
+        #elif x == '@': raise 'bad' # w1(0)  # last in page
         elif type(x) is tuple: w1(x[0])
         elif type(x) is int: w1(x)
         else: raise Exception('weird memory: %s' % x)
 
-    # End with a zero-lenght segment with Zero name.
-    w2(0); w2(0);
+    # End with a zero-length segment with '!/' name.
+    w('!/'); w2(0);
     pass
 
 print dir(TRUE)

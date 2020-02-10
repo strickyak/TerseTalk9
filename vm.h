@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, _x, _y, (Z)); } }
+#define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, (int)_x, (int)_y, (int)(Z)); } }
 
 typedef unsigned char bool;
 typedef unsigned char byte;

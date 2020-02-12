@@ -720,12 +720,15 @@ class Memorable(object):
         if self.size < 4:
             self.padded = 4 - self.size
             self.size = 4
+        if self.size > 256:
+            raise Exception("Object size too big: %d: %s", self.size, vars(self))
         self.addr = Here
         Here += self.size
         MemorableList.append(self)
 
     def Materialize(self):
         print 'Materialize:', self
+        print 'Materialize:', vars(self)
         for k,v in vars(self).items():
             if k.startswith('b_'):
                 k2 = 'B_' + k[2:]
@@ -840,13 +843,14 @@ K_FLEX_BYTES = 1
 K_FLEX_PTRS = 2
 class Cls(Obj):
     B_flags = 2  # e.g. K_FLEX_BYTES, K_FLEX_PTRS
-    B_numB = 3   # Number of byte slots.
-    B_numP = 4   # Number of Oop slots.
-    B_this = 5   # This class index.
-    B_partner = 6   # class to meta; meta to class.
-    P_sup = 7       # Superclass, by Pointer, for faster method dispatch.
-    P_meths = 9   # Head of linked list of meths.
-    FLEX_BYTES = 11 # For the name of the class, so it does not have to be interned.
+    B_bSize = 3  # Base size of instance in bytes.
+    B_numB = 4   # Number of byte slots.
+    B_numP = 5   # Number of Oop slots.
+    B_this = 6   # This class index.
+    B_partner = 7   # class to meta; meta to class.
+    P_sup = 8       # Superclass, by Pointer, for faster method dispatch.
+    P_meths = 10   # Head of linked list of meths.
+    FLEX_BYTES = 12 # For the name of the class, so it does not have to be interned.
 
 class Metacls(Cls):
     pass
@@ -897,14 +901,14 @@ K_LCL3 = -8
 Method['URCLS']['new'] = '''C
     word rcvr = W(fp + K_RCVR);
     fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
-    word z = MakeInstance(rcvr, 0, 0);
+    word z = MakeInstance(rcvr, 0);
     PUSH(z);
 '''
 Method['URCLS']['new:'] = '''C
     word rcvr = W(fp + K_RCVR);
     fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
     word n = W(fp + K_ARG1);
-    word z = MakeInstance(rcvr, 0xFFFF, OOP2UB(n));
+    word z = MakeInstance(rcvr, OOP2NUM(n));
     PUSH(z);
 '''
 Method['UR']['same'] = 'B self a same'
@@ -914,16 +918,16 @@ Method['UR']['not'] = 'B self not'  # Most objects are true.
 
 Method['UR']['bytlen'] = 'B self bytlen'
 Method['UR']['ptrlen'] = 'B self ptrlen'
-Method['UR']['bytat:'] = 'B self a bytat'
-Method['UR']['ptrat:'] = 'B self a ptrat'
-Method['UR']['bytat:put:'] = 'B b self a bytputat nil'
-Method['UR']['ptrat:put:'] = 'B b self a ptrputat nil'
-Method['ARRBYT']['bytlen'] = 'B self bytlen'
-Method['ARRBYT']['at:'] = 'B self a bytat'
-Method['ARRBYT']['at:put:'] = 'B b self a bytputat nil'
-Method['ARRPTR']['ptrlen'] = 'B self ptrlen'
-Method['ARRPTR']['at:'] = 'B self a ptrat'
-Method['ARRPTR']['at:put:'] = 'B b self a ptrputat nil'
+Method['UR']['bytat:'] = 'B a self bytat'
+Method['UR']['ptrat:'] = 'B a self ptrat'
+Method['UR']['bytat:put:'] = 'B b a self bytatput nil'
+Method['UR']['ptrat:put:'] = 'B b a self ptratput nil'
+Method['ARRBYT']['len'] = 'B self bytlen'
+Method['ARRBYT']['at:'] = 'B a self bytat'
+Method['ARRBYT']['at:put:'] = 'B b self a bytatput nil'
+Method['ARRPTR']['len'] = 'B self ptrlen'
+Method['ARRPTR']['at:'] = 'B a self ptrat'
+Method['ARRPTR']['at:put:'] = 'B b self a ptratput nil'
 
 Method['DEMO']['run'] = '''B
     lit_b 51 self #double: lit_w %d %d call dup show
@@ -931,7 +935,7 @@ Method['DEMO']['run'] = '''B
     add dup show
 ''' % (0xDE, 0x01, 0xDE, 0x01)
 
-Method['DEMO']['run2'] = '''T
+Method['DEMO']['run2setup'] = '''T
     acct = Demo new init.
             acct balance show.
     acct deposit: 10.
@@ -940,6 +944,9 @@ Method['DEMO']['run2'] = '''T
             acct balance show.
     acct withdraw: 20.
             acct balance show.
+'''
+Method['DEMO']['run2'] = '''T
+    self run2setup.
     IF( 5 )THEN( 5 show ).
     IF( true )THEN( 42 show )ELSE( 666 show ).
     n = 3.
@@ -951,7 +958,6 @@ Method['DEMO']['run2'] = '''T
     FOR( i : 5 )DO( (p bytAt: i) show ).
     FOR( i : 5 )DO( ((p bytAt: i) == i) must ).
     p bytLen show.
-
 '''
 
 Method['DEMO']['double:'] = 'B arg1 arg1 add '  # Using Bytecodes.
@@ -981,55 +987,37 @@ Op['cls_b'] = ' byte n = BYTE(pc); pc += 1; PUSH(ClassVec[n]); '
 Op['clsof'] = ' word x = PEEK(0); POKE(0, CLASSOF(x)); '
 Op['same'] = ' word x = POP(); word y = PEEK(0); POKE(0, (x==y));'
 
-Op['bytlen'] = '''
-    word p = PEEK(0); word pcls = CLASSOF(p);
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_BYTES, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    byte len = B(p + flex_at);
-    POKE(0, UB2OOP(len));
-    Hex20("bytlen obj", flex_at, p);
+Op['bytlen'] = ''' // p -> len
+    word p = PEEK(0);
+    POKE(0, NUM2OOP(BytLen(p)));
 '''
-Op['ptrlen'] = '''
-    word p = PEEK(0); word pcls = CLASSOF(p);
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_PTRS, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    byte len = B(p + flex_at)>>1;
-    POKE(0, UB2OOP(len));
+Op['ptrlen'] = ''' // p -> len
+    word p = PEEK(0);
+    POKE(0, NUM2OOP(PtrLen(p)));
 '''
-Op['bytat'] = '''
-    word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_PTRS, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    word lim = B(p + flex_at);
-    CHECK3(i < lim, 1, p);
-    byte val = B(p + flex_at + 1 + i);
-    POKE(0, UB2OOP(val));
-'''
-Op['bytputat'] = '''
-    word i = POP(); word p = POP(); word pcls = CLASSOF(p);
-    word val = POP();
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_BYTES, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    word lim = B(p + flex_at);
-    CHECK3(i < lim, 1, p);
-    PUT_BYTE(p + flex_at + 1 + i, OOP2UB(val));
+Op['bytat'] = ''' // p i -> b
+    word i = OOP2NUM(POP());
+    word p = PEEK(0);
+    POKE(0, NUM2OOP(BytAt(p, i)));
 '''
 Op['ptrat'] = '''
-    word i = POP(); word p = PEEK(0); word pcls = CLASSOF(p);
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_PTRS, K_FLEX_PTRS, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    word lim = B(p + flex_at);
-    CHECK3(i*2 < lim, 1, p);
-    POKE(0, W(p + flex_at + 1 + 2*i));
+    word i = OOP2NUM(POP());
+    word p = PEEK(0);
+    POKE(0, PtrAt(p, i));
 '''
-Op['ptrputat'] = '''
-    word i = POP(); word p = POP(); word pcls = CLASSOF(p);
-    word val = POP();
-    CHECK3(B(pcls+CLS_B_flags) & K_FLEX_BYTES, K_FLEX_BYTES, p);
-    byte flex_at = B(pcls+CLS_B_numB) + 2*B(pcls+CLS_B_numP);
-    word lim = B(p + flex_at);
-    CHECK3(i*2 < lim, 1, p);
-    PUT_WORD(p + flex_at + 1 + 2*i, val);
+Op['bytatput'] = '''
+    word v = OOP2NUM(PEEK(0));
+    word i = OOP2NUM(PEEK(2));
+    word p = PEEK(4);
+    BytAtPut(p, i, v);
+    sp += 6;
+'''
+Op['ptratput'] = '''
+    word v = PEEK(0);
+    word i = OOP2NUM(PEEK(2));
+    word p = PEEK(4);
+    PtrAtPut(p, i, v);
+    sp += 6;
 '''
 
 Op['forward_jump_b'] = '''
@@ -1077,7 +1065,7 @@ Op['getb_b'] = '''
     byte n = BYTE(pc); pc += 1;
     word obj = PEEK(0);
     byte x = B(obj + n);
-    POKE(0, UB2OOP(x));
+    POKE(0, NUM2OOP(x));
 '''
 Op['putb_b'] = '''
     byte n = BYTE(pc); pc += 1;
@@ -1085,7 +1073,7 @@ Op['putb_b'] = '''
     word x = POP();
     CHECK3(x&1, 1, x);
     CHECK3(x&0xFE00, 0, x);
-    PUT_BYTE(obj+n, OOP2UB(x));
+    PUT_BYTE(obj+n, OOP2BYTE(x));
 '''
 
 # Store/Recall local variables.
@@ -1104,7 +1092,7 @@ Op['incr_local_b'] = 'byte n = BYTE(pc); pc += 1; word p = fp-2*(n+1); word w = 
 Op['true'] = '  PUSH(trueAddr);'
 Op['false'] = '  PUSH(falseAddr);'
 Op['nil'] = '  PUSH(nilAddr);'
-Op['show'] = '  word w = POP(); printf(" ==$%04x=%u.== ", w, w);'
+Op['show'] = '  word w = POP(); printf(" ==$%04x=%u.==\\n", w, w); fflush(stdout); '
 
 Op['lit2pcr'] = '''
   PUSH(WORD(pc) - pc);
@@ -1200,7 +1188,7 @@ Op['call0_b'] = '''
   for (i=0; i<numL; i++) {
     PUSH(nilAddr);
   }
-  pc = meth + METH_FLEXSIZE + 1;
+  pc = meth + METH_FLEXSIZE;
 '''
 
 Op['call1_b'] = '''
@@ -1222,7 +1210,7 @@ Op['call1_b'] = '''
   for (i=0; i<B(meth + METH_B_numL); i++) {
     PUSH(nilAddr);
   }
-  pc = meth + METH_FLEXSIZE + 1;
+  pc = meth + METH_FLEXSIZE;
 '''
 
 Op['call2_b'] = '''
@@ -1244,16 +1232,19 @@ Op['call2_b'] = '''
   for (i=0; i<B(meth + METH_B_numL); i++) {
     PUSH(nilAddr);
   }
-  pc = meth + METH_FLEXSIZE + 1;
+  pc = meth + METH_FLEXSIZE;
 '''
 
 Op['call'] = '''
   word rcvr = PEEK(4); 
-  Hex20("call--rcvr", rcvr, rcvr);
+  //Hex20("call--rcvr", rcvr, rcvr);
+  Inspect(rcvr, "call--rcvr");
   word msg = PEEK(2); 
-  Hex20("call--msg", msg, msg);
+  //Hex20("call--msg", msg, -1);
+  PrintSymNum(msg, "call--msg");
+  Inspect(SymVec[msg], "call--msg");
   word de = PEEK(0); 
-  Hex20("call--de", de, de);
+  Hex20("call--de", de, -1);
   CHECK3(de & 0xFFF0, 0xDE00, de);
   PUSH(pc);
   PUSH(fp);
@@ -1263,12 +1254,15 @@ Op['call'] = '''
   Hex20("STACK fp,pc,de,msg,rcvr...", sp, sp);
 
   word meth = FindMethBySymbolNumber(rcvr, msg);
+  Inspect(meth, "call--meth");
   byte i;
-  for (i=0; i<B(meth + METH_B_numL); i++) {
+  byte num_locals = BF(meth, METH_B_numL);
+  fprintf(stderr, "Num Locals = %d\\n", num_locals);
+  for (i=0; i<num_locals; i++) {
     PUSH(nilAddr);
   }
-  if (B(meth + METH_FLEXSIZE)) {
-    pc = meth + METH_FLEXSIZE + 1;
+  if (BytLen(meth)) {
+    pc = FlexAddrAt(meth, 0);
   }
 '''
 
@@ -1313,19 +1307,20 @@ NIL.Reify(), FALSE.Reify(), TRUE.Reify()
 
 def FixSlotsOnClass(c, inst):
     print 'FNORD', inst.nick, dir(c)
-    # Check the bslots, pslots, & flexes; compute b_flags, b_numB, b_numP
+    # Check the bslots, pslots, & flexes; compute b_flags, b_bSize, b_numB, b_numP
     bslots = [(k, getattr(c, k)) for k in dir(c) if k.startswith('B_')]
     pslots = [(k, getattr(c, k)) for k in dir(c) if k.startswith('P_')]
     flexes = [(k, getattr(c, k)) for k in dir(c) if k.startswith('FLEX_')]
-    print 'cBPF', c, bslots, pslots, flexes
     bslots = sorted(bslots, key=lambda pair: pair[1])
     pslots = sorted(pslots, key=lambda pair: pair[1])
+    print 'cBPF', c, bslots, pslots, flexes
     for i, (k, v) in zip(range(len(bslots)), bslots):
         if i != v: raise Exception("Bad B_ numbers in class %s: %s" % (c, bslots))
     for i, (k, v) in zip(range(len(pslots)), pslots):
         if len(bslots)+2*i != v: raise Exception("Bad P_ numbers in class %s: %s" % (c, pslots))
     inst.b_numB = len(bslots)
     inst.b_numP = len(pslots)
+    inst.b_bSize = inst.b_numB + 2*inst.b_numP
     if flexes:
         assert len(flexes) == 1  # ThereCanOnlyBeOne
         if flexes[0][0]=='FLEX_BYTES':
@@ -1350,7 +1345,7 @@ for c in AllClassesPreorder():
     inst.flexstring = inst.name
     inst.flexsize = len(inst.name)
     inst.flexbytes = [ord(s) for s in inst.name]
-    inst.b_this = len(ClassDict) + 1  # Skip the 0 class, meaning unused.
+    inst.b_this = len(ClassDict) + 1  # Skip the 0 class, meaning unused memory.
     ClassVec[inst.b_this] = inst
     inst.sup = None if c is Ur else c.__bases__[0]
     inst.p_sup = NIL if c is Ur else ClassDict[c.__bases__[0].__name__.upper()]
@@ -1358,6 +1353,32 @@ for c in AllClassesPreorder():
     inst.Reify()
     ClassDict[inst.name] = inst
     FixSlotsOnClass(c, inst)
+
+def WriteInspectors():
+  for cname, c in sorted(ClassDict.items()):
+    print 'struct FieldInfo FI_%s[] = {' % (
+            c.name)
+    for bs in c.bslots:
+        fname, foff = bs
+        print '  { "%s", 1, %d }, ' % (fname, foff)
+    for ps in c.pslots:
+        fname, foff = ps
+        print '  { "%s", 2, %d }, ' % (fname, foff)
+    print '  { NULL, 0, 0 }'
+    print '};'
+
+    print '''
+struct ClassInfo CI_%s = {
+        "%s",
+        %d,
+        FI_%s};
+    ''' % (c.name, c.name, c.b_this, c.name)
+
+  print 'void InitInfo() {'
+  for cname, c in sorted(ClassDict.items()):
+      print '  ClassInfos[%d] = &CI_%s;' % (
+        c.b_this, c.name)
+  print '}'
 
 # Create metaclass objects.
 METACLS = ClassDict['METACLS']
@@ -1411,7 +1432,7 @@ for i, op in zip(range(len(OpList)), OpList):
 print '=== OpNums:', repr(OpNums)
 
 def CompileMethod(cname, mname, v):
-    numL = 0
+    numL = 2
     if v[0] == 'T':
         codes, numL = CompileToCodes(v[1:], ClassDict[cname])
         # Change to format 'B' for text bytecode string.
@@ -1619,7 +1640,8 @@ void Boot() {
     print '  nilAddr = 0x%04x;' % NIL.addr
     print '  falseAddr = 0x%04x;' % FALSE.addr
     print '  trueAddr = 0x%04x;' % TRUE.addr
-    print '  intClassAddr = 0x%04x;' % ClassDict['INT'].addr
+    print '  intAddr = 0x%04x;' % ClassDict['INT'].addr
+    print '  clsAddr = 0x%04x;' % ClassDict['CLS'].addr
     print '''
 }
 '''
@@ -1736,6 +1758,7 @@ sys.stdout.close()
 
 sys.stdout = open('_generated.c', 'w')
 GenerateC()
+WriteInspectors()
 sys.stdout.close()
 
 sys.stdout = open('_generated.image', 'wb')

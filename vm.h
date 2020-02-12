@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, (int)_x, (int)_y, (int)(Z)); } }
+#define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, (int)_x, (int)_y, (int)(Z)); abort(); } }
 
 typedef unsigned char bool;
 typedef unsigned char byte;
@@ -18,7 +18,7 @@ extern word ClassVec[];
 extern word Intern[256];     // Symbols.  Index is message number.
 
 extern word nilAddr, falseAddr, trueAddr;
-extern word intClassAddr;
+extern word intAddr, clsAddr;
 
 extern word pc, fp, sp, tmp;
 
@@ -32,28 +32,60 @@ extern word pc, fp, sp, tmp;
 
 #define PEEK(N) WORD(sp + (N))
 #define POKE(N,X) PUT_WORD(sp + (N), X)
-#define POP() ((tmp = WORD(sp)), (sp+=2), tmp)
 #define PUSH(X) ((sp-=2), PUT_WORD(sp, (X)))
+#define POP() ((tmp = WORD(sp)), (sp+=2), tmp)
+#define DROP() (sp+=2)
 
 #define LOCAL(N) WORD(fp + 2 * (4 + (N)))  // over prevFP, prevPC, numArg, msg.  rcvr=0, 1,2,3=arg1,2,3
 #define PUT_LOCAL(N,X) PUT_WORD(fp + 2 * (4 + (N)), (X))
 
-extern word MakeInstance(word cls, word flexbytes, byte flexsize);
-extern word FindMethBySymbolNumber(word rcvr, byte msg);
-extern byte FindSymIndex(char* s, byte len);
-extern word FindClassP(char* name, byte len);
-extern void Loop();
-extern void Hex20(char* label, int d, word p);
+word MakeInstance(word cls, byte flexsize);
+word FindMethBySymbolNumber(word rcvr, byte msg);
+byte FindSymIndex(char* s, byte len);
+word FindClassP(char* name, byte len);
+void Loop();
+void Hex20(const char* label, int d, word p);
 // NIL, FALSE, and 0 are false; all else are true.
-extern bool Truth(word x);
+bool Truth(word x);
 
-#define RAISE(S) {fprintf(stderr, "\n*** RAISE: %s\n", (S)); exit(13);}
+word FlexAddrAt(word p, word i);
+word BytLen(word p);
+word PtrLen(word p);
+byte BytAt(word p, word i);
+word PtrAt(word p, word i);
+void BytAtPut(word p, word i, word v);
+void PtrAtPut(word p, word i, word v);
+const char* FlexName(word cls);
+const char* FlexNameOfClassOf(word inst);
+int RAISE(const char* s);
+
 #define HL(H,L) ((((word)(H)&255)<<8) | ((word)(L)&255))
 #define UPPER(C) ('a' <= (byte)(C) && (byte)(C) <= 'z' ? (byte)(C)-32 : (byte)(C))
 
-#define UB2OOP(B) (((word)(B)<<1)|1)  // Unsigned byte to oop.
-#define OOP2UB(P) ((byte)((word)(P)>>1))
+#define NUM2OOP(N) (((word)(N)<<1)|1)
+#define OOP2NUM(P) ((word)(P)>>1)
+#define OOP2BYTE(P) (byte)((word)(P)>>1)
 
-#define CLASSOF(X) ((X)&1 ? intClassAddr : ClassVec[B((X) + CLS_B_cls)])
+#define BF(P,F) B((P)+(F))  // get byte-sized field
+#define WF(P,F) W((P)+(F))  // get word-sized field
+#define CLASSOF(X) ((X)&1 ? intAddr : ClassVec[B((X) + CLS_B_cls)])
+#define BASE_SiZE(X) ((X)&1 ? 0 : ClassVec[B((X) + CLS_B_cls)])
 
+struct FieldInfo {
+  const char* name;
+  byte width;
+  byte offset;
+};
+
+struct ClassInfo {
+  const char* name;
+  byte num;
+  struct FieldInfo* fields;
+};
+
+extern struct ClassInfo* ClassInfos[256];
+extern void InitInfo();
+extern void Inspect(word w, const char* msg);
+extern void PrintSymNum(byte num, const char* label);
+extern void PrintStr(word str, const char* label);
 #endif

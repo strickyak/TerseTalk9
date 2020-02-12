@@ -11,3 +11,7 @@ all:
 
 clean:
 	rm -f tt _generated.*
+
+indent:
+	indent -kr -nut -i2 -l100 *.c
+	indent -kr -nut -i2 -l100 *.h

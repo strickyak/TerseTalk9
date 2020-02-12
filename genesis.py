@@ -1,4 +1,4 @@
-# TODO: put the name flexstring in the Class. 
+# TODO: put the name flexstring in the Class.
 # Class is not "Named" and its names are not interned.
 # Sym continues like today.  Meth is named.
 
@@ -315,7 +315,7 @@ class Parser(object):
 
         if len(rargs) > 1:
             return PKeyword(rargs[0], keywords, rargs[1:])
-        else:        
+        else:
             return rargs[0]
 
     def ParseRel(self):
@@ -360,7 +360,7 @@ class Parser(object):
             self.lex.Advance()
             typ, s, i = self.lex.token
         return a
-            
+
 for s in [
     '4',
     '4 - 6',
@@ -496,7 +496,7 @@ class CompilerVisitor(object):
             else:
                 self.codes.append('sto_b')
                 self.codes.append(i)
-        
+
     def visitList(self, p):
         raise 'TODO'
 
@@ -945,7 +945,7 @@ Method['DEMO']['run2setup'] = '''T
     acct withdraw: 20.
             acct balance show.
 '''
-Method['DEMO']['run2'] = '''T
+Method['DEMO']['RUN2'] = '''T
     self run2setup.
     IF( 5 )THEN( 5 show ).
     IF( true )THEN( 42 show )ELSE( 666 show ).
@@ -1171,8 +1171,8 @@ Op['subtract'] = '''
 Op['call0_b'] = '''
   byte msg = BYTE(pc);
   pc += 1;
-  word rcvr = PEEK(0); 
-  
+  word rcvr = PEEK(0);
+
   PUSH(msg);
   PUSH(0xDE00);
   PUSH(pc);
@@ -1194,8 +1194,8 @@ Op['call0_b'] = '''
 Op['call1_b'] = '''
   byte msg = BYTE(pc);
   pc += 1;
-  word rcvr = PEEK(0); 
-  
+  word rcvr = PEEK(0);
+
   PUSH(msg);
   PUSH(0xDE01);
   PUSH(pc);
@@ -1216,8 +1216,8 @@ Op['call1_b'] = '''
 Op['call2_b'] = '''
   byte msg = BYTE(pc);
   pc += 1;
-  word rcvr = PEEK(0); 
-  
+  word rcvr = PEEK(0);
+
   PUSH(msg);
   PUSH(0xDE02);  // This is all that changes..... TODO
   PUSH(pc);
@@ -1236,14 +1236,14 @@ Op['call2_b'] = '''
 '''
 
 Op['call'] = '''
-  word rcvr = PEEK(4); 
+  word rcvr = PEEK(4);
   //Hex20("call--rcvr", rcvr, rcvr);
   Inspect(rcvr, "call--rcvr");
-  word msg = PEEK(2); 
+  word msg = PEEK(2);
   //Hex20("call--msg", msg, -1);
   PrintSymNum(msg, "call--msg");
   Inspect(SymVec[msg], "call--msg");
-  word de = PEEK(0); 
+  word de = PEEK(0);
   Hex20("call--de", de, -1);
   CHECK3(de & 0xFFF0, 0xDE00, de);
   PUSH(pc);
@@ -1541,7 +1541,7 @@ for (k, v) in InternDict.items():
     if len(s) + len(k) > MAX_FLEX_BYTES:
         s = ''
         PackedStrings.append(s)
-    InternLoc[k] = (len(PackedStrings), len(s)) 
+    InternLoc[k] = (len(PackedStrings), len(s))
     s += k
     PackedStrings[-1] = s  # Put the new string back.
 # Reify the interned symbols.
@@ -1575,7 +1575,9 @@ for m in MemorableList:
     assert m.b_gcsize[0] > 0, vars(m)
     assert m.b_gcsize[0] < 128, vars(m)
     m.CLS = ClassDict[m.__class__.__name__.upper()]
-    m.b_cls = m.CLS.b_this
+    if type(m) is not Cls:
+      # Do not change classes, which are already correct.
+      m.b_cls = m.CLS.b_this
     m.Materialize()
 
 pass;pass;pass

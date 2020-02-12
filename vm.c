@@ -327,7 +327,6 @@ byte FindSymIndex(char *s, byte len) {
   Hex20("FindSymIndex", len, 0);
   Hex20(s, len, 0);
   for (byte i = 0; i < SymVecLen; i++) {
-    //fprintSymNum(stderr, ".......... try", i);
     word y = SymVec[i];
     if (B(y + SYM_B_len) != len)
       continue;
@@ -438,7 +437,7 @@ FINISH:
   fclose(fd);
 }
 
-#if 0
+#if 1
 void Call0(word rcvr, byte msgNum) {
   word m = FindMethBySymbolNumber(rcvr, msgNum);
   sp = 0x8000;
@@ -454,13 +453,10 @@ void Call0(word rcvr, byte msgNum) {
   for (byte i = 0; i < numL; i++) {
     PUSH(nilAddr);
   }
-  // pc = FlexAddrAt(m, 0);
-  Hex20("METH_FLEXSIZE", METH_FLEXSIZE, -1);
-  pc = m + METH_FLEXSIZE;
-  Hex20("Start Loop", pc, pc);
-  Hex20("FOO", METH_FLEXSIZE, -1);
+  pc = FlexAddrAt(m, 0);
+  Hex20("Call0: Start Loop", pc, pc);
   Loop();
-  Hex20("Ended Loop", pc, pc);
+  Hex20("Call0: Ended Loop", pc, pc);
 }
 #endif
 
@@ -498,8 +494,9 @@ void RunDemo() {
   Loop();
   Hex20("Ended Loop", pc, pc);
 
-  //i = FindSymIndex("RUN2", 4);
-  //Call0(inst, i);
+  word run2 = FindSymIndex("RUN2", 4);
+  fprintf(stderr, "FindSymIndex RUN2 -> %d\n", run2);
+  Call0(inst, run2);
 }
 
 int main() {

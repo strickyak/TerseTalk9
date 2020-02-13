@@ -7,6 +7,23 @@
 
 #define CHECK3(X,Y,Z) { word _x = (X); word _y = (Y); if(_x!=_y) { fprintf(stderr, "CHECK FAILS: file %s line %d: 0x%04x != 0x%04x: extra=0x%04x\n", __FILE__, __LINE__, (int)_x, (int)_y, (int)(Z)); abort(); } }
 
+#if 0
+// Stack frame offsets from `fp`.
+#define K_ARG4 16
+#define K_ARG3 14
+#define K_ARG2 12
+#define K_ARG1 10
+#define K_RCVR 8
+#define K_MSG 6
+#define K_DE 4
+#define K_RET_PC 2
+#define K_RET_FP 0
+#define K_LCL0 -2
+#define K_LCL1 -4
+#define K_LCL2 -6
+#define K_LCL3 -8
+#endif
+
 typedef unsigned char bool;
 typedef unsigned char byte;
 typedef unsigned short word;
@@ -69,6 +86,7 @@ int RAISE(const char *s);
 #define BF(P,F) B((P)+(F))      // get byte-sized field
 #define WF(P,F) W((P)+(F))      // get word-sized field
 #define CLASSOF(X) ((X)&1 ? intAddr : ClassVec[B((X) + CLS_B_cls)])
+#define CLASSNUMOF(X) ((X)&1 ? BF(intAddr, CLS_B_this): B((X) + CLS_B_cls))
 #define BASE_SiZE(X) ((X)&1 ? 0 : ClassVec[B((X) + CLS_B_cls)])
 
 struct FieldInfo {
@@ -88,4 +106,5 @@ extern void InitInfo();
 extern void Inspect(word w, const char *msg);
 extern void PrintSymNum(byte num, const char *label);
 extern void PrintStr(word str, const char *label);
+extern void PrintWhere();
 #endif

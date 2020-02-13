@@ -53,8 +53,43 @@ void PrintSymNum(byte num, const char *label) {
   PrintStr(sym, label);
 }
 
+void PrintWhere() {
+  Hex20("~~sp~~", -1, sp);
+  Hex20("~~fp~~", -1, fp);
+  // Count how many frames there are.
+  int num_frames = 0;
+  for (word p = fp; p; p = W(p)) {
+    ++num_frames;
+    assert(num_frames < 1000);  // abort infinite loop.
+  }
+
+  int frame = num_frames;
+  for (word p = fp; p; p = W(p)) {
+    word de = W(p + K_DE);
+    assert((de & 0xFFF0) == 0xDE00);
+    if (frame < 2) {
+      fprintf(stderr, "STACK: #%d[fp=%04x]\n", frame, p);
+      break;
+    }
+    word nargs = de & 0x0F;     // less than 16.
+    word sym_num = W(p + K_MSG);
+    word rcvr = W(p + K_RCVR);
+    fprintf(stderr, "CLASSNUMOF(rcvr): $%04x\n", CLASSNUMOF(rcvr));
+    struct ClassInfo *ci = ClassInfos[CLASSNUMOF(rcvr)];
+    const char *cname = ci ? ci->name : "?";
+    fprintf(stderr, "STACK: #%d[fp=%04x] r=%04x(%s)", frame, p, rcvr, cname);
+    PrintSymNum(sym_num, "~~~~");
+    for (word i = 0; i < nargs; i++) {
+      Hex20("~~~~~~~ arg:", i, W(p + K_ARG1 + 2 * i));
+    }
+    assert(ci);
+    frame--;
+  }
+}
+
 void Inspect(word w, const char *msg) {
   word raw_size = 2 + 2 * (word) BF(w, UR_B_gcsize);
+  fprintf(stderr, "\n[[[[inspect %04x [%d. -> %d.] %s]]]]\n", w, BF(w, UR_B_gcsize), raw_size, msg);
   assert(4 <= raw_size);
   assert(raw_size <= 256);
   word cnum = BF(w, UR_B_cls);
@@ -211,6 +246,7 @@ word PtrAt(word p, word i) {
   return W(FlexAddrAt(p, i << 1));
 }
 void BytAtPut(word p, word i, word v) {
+  Inspect(p, "BytAtPut");
   PUT_BYTE(FlexAddrAt(p, i), v);
 }
 void PtrAtPut(word p, word i, word v) {

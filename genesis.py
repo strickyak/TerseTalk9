@@ -902,13 +902,16 @@ Method['URCLS']['new'] = '''C
     word rcvr = W(fp + K_RCVR);
     fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
     word z = MakeInstance(rcvr, 0);
+    Inspect(z, "URCLS new.");
     PUSH(z);
 '''
 Method['URCLS']['new:'] = '''C
     word rcvr = W(fp + K_RCVR);
-    fprintf(stderr, "URCLS::new -- rcvr=%04x\\n", rcvr);
     word n = W(fp + K_ARG1);
+    fprintf(stderr, "URCLS::new:a -- rcvr=$%04x a==$%x=%d.\\n", rcvr, n, n);
     word z = MakeInstance(rcvr, OOP2NUM(n));
+    Hex20("URCLS new: -->", n, z);
+    Inspect(z, "URCLS new:.");
     PUSH(z);
 '''
 Method['UR']['same'] = 'B self a same'
@@ -996,26 +999,26 @@ Op['ptrlen'] = ''' // p -> len
     POKE(0, NUM2OOP(PtrLen(p)));
 '''
 Op['bytat'] = ''' // p i -> b
-    word i = OOP2NUM(POP());
-    word p = PEEK(0);
+    word p = POP();
+    word i = OOP2NUM(PEEK(0));
     POKE(0, NUM2OOP(BytAt(p, i)));
 '''
 Op['ptrat'] = '''
-    word i = OOP2NUM(POP());
-    word p = PEEK(0);
+    word p = POP();
+    word i = OOP2NUM(PEEK(0));
     POKE(0, PtrAt(p, i));
 '''
 Op['bytatput'] = '''
-    word v = OOP2NUM(PEEK(0));
+    word p = PEEK(0);
     word i = OOP2NUM(PEEK(2));
-    word p = PEEK(4);
+    word v = PEEK(4);
     BytAtPut(p, i, v);
     sp += 6;
 '''
 Op['ptratput'] = '''
-    word v = PEEK(0);
+    word p = PEEK(0);
     word i = OOP2NUM(PEEK(2));
-    word p = PEEK(4);
+    word v = PEEK(4);
     PtrAtPut(p, i, v);
     sp += 6;
 '''
@@ -1189,6 +1192,7 @@ Op['call0_b'] = '''
     PUSH(nilAddr);
   }
   pc = meth + METH_FLEXSIZE;
+  PrintWhere();
 '''
 
 Op['call1_b'] = '''
@@ -1211,6 +1215,7 @@ Op['call1_b'] = '''
     PUSH(nilAddr);
   }
   pc = meth + METH_FLEXSIZE;
+  PrintWhere();
 '''
 
 Op['call2_b'] = '''
@@ -1233,6 +1238,7 @@ Op['call2_b'] = '''
     PUSH(nilAddr);
   }
   pc = meth + METH_FLEXSIZE;
+  PrintWhere();
 '''
 
 Op['call'] = '''
@@ -1264,6 +1270,7 @@ Op['call'] = '''
   if (BytLen(meth)) {
     pc = FlexAddrAt(meth, 0);
   }
+  PrintWhere();
 '''
 
 Op['return'] = '''
@@ -1287,6 +1294,7 @@ Op['return'] = '''
   nargs &= 255;
   sp += 2 * (nargs + 2 /* msg, rcvr*/ );
   PUSH(result);
+  PrintWhere();
 '''
 
 def AllClassesPreorder(start=Ur):
@@ -1665,7 +1673,12 @@ void Loop() {
 '''
     for op in OpList:
         print '\tcase OP_%s: {' % op
-        print '\t  fprintf(stderr, "OP: %s\\n");' % op
+        if op.endswith('_B'):
+          print '\t  fprintf(stderr, "OP: %s $%%02x=%%d.\\n", B(pc), B(pc));' % op
+        elif op.endswith('_W'):
+          print '\t  fprintf(stderr, "OP: %s $%%04x=%%d.\\n", W(pc), W(pc));' % op
+        else:
+          print '\t  fprintf(stderr, "OP: %s\\n");' % op
         for k,v in Op.items():
             done = False
             if k.upper() == op:
